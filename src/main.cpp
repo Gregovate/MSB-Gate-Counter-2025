@@ -11,6 +11,8 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 
 /*
 ## BEGIN CHANGELOG ##
+24.11.18.1  Removed SD/RTC infinite while(1) loops to prevent hard lockups;
+            Added MQTT firmware publish on connect.
 24.12.28.1 Bug in alarm logic removed.
 24.12.26.1 Added alarm if beam sensor remains high for more than 3 minutes
 24.12.19.6 Removed temperature array from average procedure an used the global declared array
@@ -111,7 +113,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "24.12.28.1"   // Firmware Version
+#define FWVersion "25.11.18.1"   // Firmware Version
 #define OTA_Title "Gate Counter" // OTA Title
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
@@ -153,6 +155,8 @@ char topicBase[60];
 #define MQTT_PUB_MAGBEAM_MS "msb/traffic/GateCounter/mag-beam_ms"
 #define MQTT_PUB_BETWEENCARS_MS "msb/traffic/GateCounter/betweenCars"
 #define MQTT_PUB_BEAMHIGH_MS "msb/traffic/GateCounter/beam-high_ms"
+#define MQTT_PUB_FIRMWARE "msb/traffic/GateCounter/firmware"
+
 // Subscribing Topics (to reset values)
 #define MQTT_SUB_TOPIC0  "msb/traffic/CarCounter/EnterTotal"          // get enter counts from carCounter
 #define MQTT_SUB_TOPIC1  "msb/traffic/GateCounter/resetDailyCount"    // Reset Daily counter
@@ -692,6 +696,7 @@ void MQTTreconnect() {
                 // Once connected, publish an announcement
                 //publishMQTT(MQTT_PUB_HELLO, "Gate Counter ONLINE on " + String(mqtt_configs[i].server));
                 publishMQTT(MQTT_PUB_HELLO, "Gate Counter ONLINE!");
+                publishMQTT(MQTT_PUB_FIRMWARE, FWVersion);  
                 publishMQTT(MQTT_PUB_TEMP, String(tempF));
                 publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
                 publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars));
@@ -1473,7 +1478,6 @@ void checkAndCreateFile(const String &fileName, const String &header = "") {
         if (fileName.endsWith("/")) { // Create directory if it ends with '/'
             if (!SD.mkdir(fileName)) {
                 Serial.printf("Failed to create directory %s\n", fileName.c_str());
-                while (1);
             } else {
                 Serial.printf("Directory %s created successfully\n", fileName.c_str());
             }
@@ -1481,7 +1485,6 @@ void checkAndCreateFile(const String &fileName, const String &header = "") {
             File file = SD.open(fileName, FILE_WRITE);
             if (!file) {
                 Serial.printf("Failed to create file %s\n", fileName.c_str());
-                while (1);
             } else {
                 if (!header.isEmpty()) {
                     file.print(header);
@@ -1524,17 +1527,19 @@ void createAndInitializeHourlyFile(const String &fileName) {
     }
 }
 
-/** Initilaize microSD card */
+/** Initilaize microSD card GAL 25-11-18*/ 
 void initSDCard() {
   if(!SD.begin(PIN_SPI_CS)) {
     Serial.println("Card Mount Failed");
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
-    display.setCursor(0,line1);
+    display.setCursor(0, line1);
     display.println("Check SD Card");
+    display.setCursor(0, line2);
+    display.println("Logging disabled");
     display.display();
-    while (1); // stop the program and check SD Card
+    // Removed while(1); — continue running without SD card
     return;
   }
   uint8_t cardType = SD.cardType();
@@ -1826,7 +1831,6 @@ void setup() {
         display.setCursor(0,line1);
         display.println("Clock DEAD");
         display.display();
-        while (1);
     }
 
     // Get NTP time from Time Server 
