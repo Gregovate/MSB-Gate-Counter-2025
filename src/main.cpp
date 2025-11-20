@@ -11,9 +11,31 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 
 /*
 ## BEGIN CHANGELOG ##
-24.11.20.1  Repurposed magSensorPin as Beam A; implemented dual-beam detection;
+25.11.20.4  Restored the proven 2024 car-detection state machine and added proper
+             input-polarity mapping for the new normally-HIGH IR beams via optocoupler.
+             Corrected multi-count behavior by adding per-event locking to prevent
+             additional counts when Beam B cycles while Beam A remains broken
+             (common in heavy, stop-and-go exit traffic). Car detection now triggers
+             only once per true Beam-A event and resets only after both beams clear.
+             Retains all legacy timing features: 750 ms Beam-A pre-trigger window,
+             carDetectMS duration threshold, between-car timing, and TTP reporting.
+
+25.11.20.3  Corrected beam logic inversion in dual-beam detection. Inputs from the
+             new optocoupler IR receivers are normally-HIGH, LOW when broken.
+             Restored 2024 state-machine semantics (LOW = beam broken) to match
+             proven car-counter behavior. Eliminated false state transitions and
+             corrected CAR_DETECTED trigger to fire only after B clears. System
+             now mirrors the stable 2024 timing and detection reliability.
+25.11.20.2  Updated dual-beam integration to use the proven 2024 state machine.
+             Re-mapped magSensorPin to Beam A and aligned raw pin reads to the
+             state machine’s expected logic (1 = broken, 0 = clear).
+             Restored all timing behavior from last season, including
+             carDetectMS threshold, 750 ms pre-trigger window, and B-duration
+             validation. Removed experimental dual-beam function and corrected
+             pinMode configuration for optocoupler inputs.
+25.11.20.1  Repurposed magSensorPin as Beam A; implemented dual-beam detection;
             removed inverted magSensor logic and aligned inputs to normally-HIGH beams.
-24.11.18.1  Removed SD/RTC infinite while(1) loops to prevent hard lockups;
+25.11.18.1  Removed SD/RTC infinite while(1) loops to prevent hard lockups;
             Added MQTT firmware publish on connect.
 24.12.28.1 Bug in alarm logic removed.
 24.12.26.1 Added alarm if beam sensor remains high for more than 3 minutes
@@ -115,7 +137,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "25.11.20.1"   // Firmware Version
+#define FWVersion "25.11.20.4"   // Firmware Version
 #define OTA_Title "Gate Counter" // OTA Title
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
@@ -1351,230 +1373,149 @@ void countTheCar() {
 // Beam B  (beamSensorPin, 33) : downstream beam
 // Both are normally HIGH (beam clear) and go LOW when broken.
 // =========================================================
-void detectCar() {
-    static bool beamAActive = false;
-    static bool beamBActive = false;
-    static unsigned long beamAStart = 0;
-    static unsigned long beamBStart = 0;
-
-    unsigned long now = millis();
-
-    // Read raw states: HIGH = clear, LOW = broken
-    int rawA = digitalRead(magSensorPin);     // Beam A
-    int rawB = digitalRead(beamSensorPin);    // Beam B
-
-    // Expose to globals / MQTT
-    magSensorState  = rawA;
-    beamSensorState = rawB;
-
-    // Publish state changes only when they change
-    if (magSensorState != lastmagSensorState) {
-        lastmagSensorState = magSensorState;
-        publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(magSensorState));
-    }
-
-    if (beamSensorState != lastbeamSensorState) {
-        lastbeamSensorState = beamSensorState;
-        publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamSensorState));
-    }
-
-    // -----------------------
-    // Track Beam A (upstream)
-    // -----------------------
-    if (rawA == LOW) {  // Beam A broken
-        if (!beamAActive) {
-            beamAActive = true;
-            beamAStart  = now;
-            publishMQTT(MQTT_COUNTER_LOG, "Beam A broken");
-        }
-    } else {
-        if (beamAActive) {
-            beamAActive = false;
-            publishMQTT(MQTT_COUNTER_LOG, "Beam A restored");
-        }
-    }
-
-    // -----------------------
-    // Track Beam B (downstream)
-    // -----------------------
-    if (rawB == LOW) {  // Beam B broken
-        if (!beamBActive) {
-            beamBActive = true;
-            beamBStart  = now;
-            publishMQTT(MQTT_COUNTER_LOG, "Beam B broken");
-
-            // Publish A→B timing if A has already broken
-            if (beamAStart > 0) {
-                unsigned long dtAB = beamBStart - beamAStart;
-                publishMQTT(MQTT_PUB_MAGBEAM_MS, String(dtAB)); // was mag-beam_ms
-            }
-        }
-    } else {
-        // Beam B restored: evaluate this event as potential vehicle
-        if (beamBActive) {
-            beamBActive = false;
-
-            unsigned long durationB = now - beamBStart;
-            timeToPassMS = durationB;
-
-            // Reuse existing topic for beam timing stats
-            publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(durationB));
-
-            bool aTriggeredFirst = (beamAStart > 0 && beamAStart <= beamBStart);
-            bool longEnough      = (durationB >= (unsigned long)carDetectMS);
-
-            if (aTriggeredFirst && longEnough) {
-                // Time between cars
-                if (lastCarExitTime > 0) {
-                    unsigned long timeBetweenCars = now - lastCarExitTime;
-                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars));
-                }
-                lastCarExitTime = now;
-
-                // Confirm and count car
-                countTheCar();
-                publishMQTT(MQTT_COUNTER_LOG, "Car confirmed and counted (A→B)");
-                publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
-            } else {
-                publishMQTT(MQTT_COUNTER_LOG,
-                            "No car: invalid timing or Beam B duration too short");
-            }
-        }
-
-        // Once B is clear again, we’re ready for the next sequence
-        beamBStart = 0;
-    }
-}
-
-
 
 //   /* 24/10/14 - Both beams are normally open. Optocoupler reads HIGH when sensors are NOT tripped
 //   changed code to read inverse of pin. Changing pinmode from pullup or pulldown made no difference 
 //   Continually Read state of sensors. REVISED 12/12/24 with new Through Beam Sensor 
 //   When the magSensor drops LOW during the IDLE state and beamSensor is also LOW, reset magSensorWasTriggered
 //   to prepare for a new car.*/
-// void detectCar() {
-//     // Read sensor states
-//     magSensorState = !digitalRead(magSensorPin);  // Assuming active high
-//     beamSensorState = digitalRead(beamSensorPin); // Assuming active low (Normally closed = 1)
+void detectCar() {
+    // Read raw states: HIGH = clear, LOW = broken
+    int rawA = digitalRead(magSensorPin);     // Beam A
+    int rawB = digitalRead(beamSensorPin);    // Beam B
 
-//     // Declare static variables for state tracking
-//     static unsigned long beamSensorHighTime = 0;  // Time when BeamSensor goes HIGH
-//     static unsigned long magSensorTripTime = 0;   // Time when MagSensor last triggered
-//     static unsigned long lastCarPassTime = 0;     // Time of the last car detection
-//     static bool magSensorTriggered = false;       // Tracks if MagSensor was triggered
-//     static bool systemReadyLogged = false;        // Tracks if "System ready" has been logged
-//     static bool alarmTriggered = false;            // Tracks if BeamSensor alarm has been triggered
-//     static unsigned long lastAlarmPublishTime = 0; // Time of the last alarm message publish
-//     unsigned long currentMillis = millis();
+    // Map to internal logic: 1 = broken, 0 = clear
+    magSensorState  = (rawA == LOW) ? 1 : 0;   // Beam A broken?
+    beamSensorState = (rawB == LOW) ? 1 : 0;   // Beam B broken?
 
-//     // Publish BeamSensor state changes
-//     if (beamSensorState != lastbeamSensorState) {
-//         lastbeamSensorState = beamSensorState;
-//         publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamSensorState));
-//     }
+    // Declare static variables for state tracking
+    static unsigned long beamSensorHighTime = 0;  // Time when BeamSensor goes "active" (broken)
+    static unsigned long magSensorTripTime  = 0;  // Time when MagSensor (Beam A) last triggered
+    static unsigned long lastCarPassTime    = 0;  // Time of the last car detection
+    static bool magSensorTriggered          = false;  // Tracks if MagSensor was triggered
+    static bool systemReadyLogged           = false;  // Tracks if "System ready" has been logged
+    static bool alarmTriggered              = false;  // Tracks if BeamSensor alarm has been triggered
+    static unsigned long lastAlarmPublishTime = 0;    // Time of the last alarm message publish
+    static bool carCounted                  = false;  // Prevent multiple counts per Beam A event
 
-//     // Publish MagSensor state changes
-//     if (magSensorState != lastmagSensorState) {
-//         lastmagSensorState = magSensorState;
-//         publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(magSensorState));
-//     }
+    unsigned long currentMillis = millis();
 
-//     // Detect MagSensor pre-trigger and reset if BeamSensor doesn't activate
-//     if (magSensorState == 1 && !magSensorTriggered) {
-//         magSensorTripTime = millis();
-//         magSensorTriggered = true;
-//         publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered (pre-beam check)!");
-//     }
+    // Publish BeamSensor state changes
+    if (beamSensorState != lastbeamSensorState) {
+        lastbeamSensorState = beamSensorState;
+        publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamSensorState));
+    }
 
-//     if (magSensorTriggered && (millis() - magSensorTripTime > 750) && beamSensorHighTime == 0) {
-//         // Reset MagSensor if BeamSensor hasn't activated within 750ms
-//         magSensorTriggered = false;
-//         publishMQTT(MQTT_COUNTER_LOG,"MagSensor reset due to no BeamSensor activation.");
-//     }
+    // Publish MagSensor state changes
+    if (magSensorState != lastmagSensorState) {
+        lastmagSensorState = magSensorState;
+        publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(magSensorState));
+    }
 
-//     // Detect BeamSensor state changes
-//     if (beamSensorState == 1 && beamSensorHighTime == 0) {
-//         // Beam rising edge detected
-//         beamSensorHighTime = millis();
-//         magSensorTriggered = false; // Reset mag sensor trigger for this car
-//         publishMQTT(MQTT_COUNTER_LOG,"BeamSensor HIGH detected!");
-//         systemReadyLogged = false;  // Reset "System ready" log flag
-//     }
+    // ---- MagSensor (Beam A) pre-trigger ----
+    if (magSensorState == 1 && !magSensorTriggered) {
+        magSensorTripTime = currentMillis;
+        magSensorTriggered = true;
+        publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered (pre-beam check)!");
+    }
 
-//     if (beamSensorState == 0 && beamSensorHighTime > 0) {
-//         // Beam falling edge detected
-//         unsigned long beamHighDuration = millis() - beamSensorHighTime;
-//         publishMQTT(MQTT_COUNTER_LOG,"BeamSensor LOW detected. Duration: " + String(beamHighDuration) + " ms");
-//         publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(beamHighDuration)); // for statistics
+    // If A triggered but B never followed within 750 ms, drop the pre-trigger
+    if (magSensorTriggered && (currentMillis - magSensorTripTime > 750) && beamSensorHighTime == 0) {
+        magSensorTriggered = false;
+        publishMQTT(MQTT_COUNTER_LOG,"MagSensor reset due to no BeamSensor activation.");
+    }
 
-//         // Check car conditions: Beam active for car not person or MagSensor triggered
-//         if (beamHighDuration >= carDetectMS || magSensorTriggered) {
-//            unsigned long currentCarPassTime = millis();
-//            timeToPassMS = currentCarPassTime-beamSensorHighTime; 
+    // ---- BeamSensor rising edge: start of event ----
+    if (beamSensorState == 1 && beamSensorHighTime == 0) {
+        // Beam "HIGH" in logical sense = beam broken
+        beamSensorHighTime = currentMillis;
+        magSensorTriggered = false; // Reset mag sensor trigger for this car
+        publishMQTT(MQTT_COUNTER_LOG,"BeamSensor HIGH detected!");
+        systemReadyLogged = false;  // Reset "System ready" log flag
+    }
+
+    // ---- BeamSensor falling edge: end of event ----
+    if (beamSensorState == 0 && beamSensorHighTime > 0) {
+        unsigned long beamHighDuration = currentMillis - beamSensorHighTime;
+        publishMQTT(MQTT_COUNTER_LOG,
+                    "BeamSensor LOW detected. Duration: " + String(beamHighDuration) + " ms");
+        publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(beamHighDuration)); // for statistics
+
+        // Check car conditions: Beam active for car not person or MagSensor triggered
+        if (!carCounted && (beamHighDuration >= (unsigned long)carDetectMS || magSensorTriggered)) {
+           unsigned long currentCarPassTime = millis();
+           timeToPassMS = currentCarPassTime - beamSensorHighTime; 
            
-//            // Calculate time between cars if applicable
-//             if (lastCarPassTime > 0) {
-//                 unsigned long timeBetweenCars = currentCarPassTime - lastCarPassTime;
-//                 publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars));
-//             }
+           // Calculate time between cars if applicable
+           if (lastCarPassTime > 0) {
+               unsigned long timeBetweenCars = currentCarPassTime - lastCarPassTime;
+               publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars));
+           }
 
-//            lastCarPassTime = currentCarPassTime; // Update last car pass time
-//            countTheCar();  // Count the car
-//            publishMQTT(MQTT_COUNTER_LOG,"Car confirmed and counted!");
-//            publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
-//         } else {
-//             publishMQTT(MQTT_COUNTER_LOG,"No car detected (Beam duration too short or no MagSensor trigger). ");
-//         }
+           lastCarPassTime = currentCarPassTime; // Update last car pass time
+           countTheCar();  // Count the car
+           carCounted = true;  // lock out further counts until Beam A clears
+           publishMQTT(MQTT_COUNTER_LOG,"Car confirmed and counted!");
+           publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
+        } else {
+            publishMQTT(MQTT_COUNTER_LOG,
+                        "No car detected (Beam duration too short or no MagSensor trigger).");
+        }
 
-//         // Reset beam timing and mag sensor state
-//         beamSensorHighTime = 0;
-//         magSensorTriggered = false; // Ensure mag sensor is reset after car passes
-//     }
+        // Reset beam timing and mag sensor state
+        beamSensorHighTime = 0;
+        magSensorTriggered = false;
+    }
 
-//     // Detect MagSensor activations during BeamSensor HIGH
-//     if (magSensorState == 1 && !magSensorTriggered && beamSensorHighTime > 0) {
-//         // MagSensor triggered for the first time during BeamSensor HIGH
-//         magSensorTripTime = millis();
-//         magSensorTriggered = true;
-//         publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered during BeamSensor HIGH!");
-//     }
+    // ---- MagSensor activations during BeamSensor HIGH ----
+    if (magSensorState == 1 && !magSensorTriggered && beamSensorHighTime > 0) {
+        magSensorTripTime = currentMillis;
+        magSensorTriggered = true;
+        publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered during BeamSensor HIGH!");
+    }
 
-//     // Log "System ready for next car" only once
-//     if (beamSensorHighTime == 0 && !magSensorTriggered && !systemReadyLogged) {
-//         publishMQTT(MQTT_COUNTER_LOG,"System ready for next car.");
-//         systemReadyLogged = true;
-//     }
-// /*
-//     // Beam Sensor Alarm
-//     if (beamSensorState == 1) {
-//         if (beamSensorHighTime == 0) {
-//             beamSensorHighTime = currentMillis; // Start timing
-//         } else if (currentMillis - beamSensorHighTime >= 180000) {
-//             // If HIGH for over 3 minutes
-//             if (!alarmTriggered) {
-//                 alarmTriggered = true;
-//                 publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor stuck HIGH for over 3 minutes!");
-//                 lastAlarmPublishTime = currentMillis; // Record the time of the alarm
-//             }
-//             // Republish the alarm message every 5 minutes
-//             else if (currentMillis - lastAlarmPublishTime >= 300000) {
-//                 publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor still stuck HIGH.");
-//                 lastAlarmPublishTime = currentMillis; // Update the time of the last publish
-//             }
-//         }
-//     } else {
-//         // BeamSensor is LOW, reset timing and clear the alarm if it was triggered
-//         if (alarmTriggered) {
-//             publishMQTT(MQTT_PUB_HELLO, "BeamSensor alarm cleared: Sensor is LOW.");
-//             alarmTriggered = false;
-//         }
-//         beamSensorHighTime = 0;
-//     }
-// */
+    // Log "System ready for next car" only once
+    if (beamSensorHighTime == 0 &&
+        magSensorState == 0 &&
+        beamSensorState == 0 &&
+        !magSensorTriggered &&
+        !systemReadyLogged) {
 
-// }
-// // END CAR DETECTION
+        carCounted = false;  // allow next car once both beams are clear again
+        publishMQTT(MQTT_COUNTER_LOG,"System ready for next car.");
+        systemReadyLogged = true;
+    }
+
+    /*
+    // Beam Sensor Alarm (still commented out; can be re-enabled later)
+    if (beamSensorState == 1) {
+        if (beamSensorHighTime == 0) {
+            beamSensorHighTime = currentMillis; // Start timing
+        } else if (currentMillis - beamSensorHighTime >= 180000) {
+            // If HIGH for over 3 minutes
+            if (!alarmTriggered) {
+                alarmTriggered = true;
+                publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor stuck HIGH for over 3 minutes!");
+                lastAlarmPublishTime = currentMillis; // Record the time of the alarm
+            }
+            // Republish the alarm message every 5 minutes
+            else if (currentMillis - lastAlarmPublishTime >= 300000) {
+                publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor still stuck HIGH.");
+                lastAlarmPublishTime = currentMillis; // Update the time of the last publish
+            }
+        }
+    } else {
+        // BeamSensor is LOW, reset timing and clear the alarm if it was triggered
+        if (alarmTriggered) {
+            publishMQTT(MQTT_PUB_HELLO, "BeamSensor alarm cleared: Sensor is LOW.");
+            alarmTriggered = false;
+        }
+        beamSensorHighTime = 0;
+    }
+    */
+}
+// END CAR DETECTION
+
 
 // CHECK AND CREATE FILES on SD Card and WRITE HEADERS if Needed
 void checkAndCreateFile(const String &fileName, const String &header = "") {
