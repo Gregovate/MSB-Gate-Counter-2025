@@ -11,6 +11,13 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 
 /*
 ## BEGIN CHANGELOG ##
+25.11.22.2  Cleaned up 2025 dual-beam MQTT topics to remove legacy Mag/Beam naming.
+             New topics: beamAState, beamBState, beamAB_ms (A→B follow),
+             and beamB_broken_ms (Beam B broken duration).
+             Added A→B follow timing publish at Beam-B break edge for diagnostics.
+             Enabled temporary dual-publishing of legacy topics (beam-high_ms and old state topics)
+             for backward HA/Grafana compatibility. No changes to car-detection logic.
+
 25.11.22.1  Fixed build break after CarCounter parity merge by relocating new
              dual-beam state-machine globals back to the main globals section.
              Ensured beamATripTime_ms is globally visible for SD logging in countTheCar().
@@ -160,7 +167,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "25.11.22.1"   // Firmware Version
+#define FWVersion "25.11.22.2"   // Firmware Version
 #define OTA_Title "Gate Counter" // OTA Title
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
@@ -194,14 +201,20 @@ char topicBase[60];
 #define MQTT_PUB_DAYOFMONTH "msb/traffic/GateCounter/DayOfMonth"
 #define MQTT_PUB_SHOWTOTAL "msb/traffic/GateCounter/ShowTotal"
 #define MQTT_PUB_TTP "msb/traffic/GateCounter/TTP"
-#define MQTT_PUB_BEAM_SENSOR_STATE "msb/traffic/GateCounter/beamBState"
-#define MQTT_PUB_MAG_SENSOR_STATE "msb/traffic/GateCounter/beamAState"
 #define MQTT_PUB_DAYSRUNNING "msb/traffic/GateCounter/DaysRunning"
 #define MQTT_DEBUG_LOG "msb/traffic/GateCounter/debuglog"
 #define MQTT_COUNTER_LOG "msb/traffic/GateCounter/CounterLog"
-#define MQTT_PUB_MAGBEAM_MS "msb/traffic/GateCounter/mag-beam_ms"
 #define MQTT_PUB_BETWEENCARS_MS "msb/traffic/GateCounter/betweenCars"
-#define MQTT_PUB_BEAMHIGH_MS "msb/traffic/GateCounter/beam-high_ms"
+#define MQTT_PUB_BEAM_SENSOR_STATE "msb/traffic/GateCounter/beamBState" // deleteme
+#define MQTT_PUB_MAG_SENSOR_STATE "msb/traffic/GateCounter/beamAState" // deleteme
+#define MQTT_PUB_MAGBEAM_MS "msb/traffic/GateCounter/mag-beam_ms" // deleteme
+#define MQTT_PUB_BEAMHIGH_MS "msb/traffic/GateCounter/beam-high_ms" // deleteme
+// 2025 dual-beam naming (A upstream, B downstream)
+#define MQTT_PUB_BEAM_A_STATE     "msb/traffic/GateCounter/beamAState"
+#define MQTT_PUB_BEAM_B_STATE     "msb/traffic/GateCounter/beamBState"
+#define MQTT_PUB_BEAM_AB_MS       "msb/traffic/GateCounter/beamAB_ms"
+#define MQTT_PUB_BEAM_B_BROKEN_MS "msb/traffic/GateCounter/beamB_broken_ms"
+
 #define MQTT_PUB_FIRMWARE "msb/traffic/GateCounter/firmware"
 #define MQTT_PUB_WIFI_SSID "msb/traffic/GateCounter/wifi_ssid"
 #define MQTT_PUB_WIFI_RSSI "msb/traffic/GateCounter/wifi_rssi"
@@ -1411,8 +1424,11 @@ void countTheCar() {
     publishMQTT(MQTT_PUB_TIME, now.toString(buf2));
     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars));
-    publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState));
-    publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState));
+    publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState)); // deleteme
+    publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState)); // deleteme
+    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
+    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
+
     publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
     //snprintf (msg, MSG_BUFFER_SIZE, "Car #%ld,", totalDailyCars);
     //Serial.print("Publish message: ");
@@ -1476,11 +1492,13 @@ void detectCar() {
     // Publish stable state changes (same topics as now)
     if (beamBState != lastBeamBState) {
         lastBeamBState = beamBState;
-        publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState));
+        publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState)); // deleteme
+        publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
     }
     if (beamAState != lastBeamAState) {
         lastBeamAState = beamAState;
-        publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState));
+        publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState)); // deleteme
+        publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
     }
 
     bool aBroken = (beamAState == 1);
@@ -1500,6 +1518,12 @@ void detectCar() {
         case BEAM_A_BROKEN:
             // Beam B follows → validate minimum activation
             if (bBroken) {
+
+                // A→B FOLLOW TIMING (correct location)
+                unsigned long abFollow = currentMillis - beamATripTime_ms;
+                publishMQTT(MQTT_PUB_BEAM_AB_MS, String(abFollow));
+
+                // Validate minimum activation
                 unsigned long timeBeamsHigh = currentMillis - beamATripTime_ms;
 
                 if (timeBeamsHigh >= minActivationDuration) {
@@ -1536,7 +1560,9 @@ void detectCar() {
                     MQTT_COUNTER_LOG,
                     "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
                 );
-                publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(brokenDuration));
+                publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(brokenDuration)); // deleteme
+
+                publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
 
                 if (brokenDuration >= (unsigned long)carDetectMS) {
                     gateDetectState = CAR_DETECTED;
@@ -1677,69 +1703,86 @@ void initSDCard() {
 }
 
 void readTempandRH() {
-    static unsigned long lastDHTReadMillis = 0;    // Last time temperature was read
-    static unsigned long lastDHTPrintMillis = 0;   // Last time temperature was printed
-    const unsigned long dhtReadInterval = 10000;  // 10 seconds interval for reading temp
-    const unsigned long dhtPrintInterval = 600000; // 10 minutes interval for printing temp
+    static unsigned long lastDHTReadMillis = 0;
+    static unsigned long lastDHTPrintMillis = 0;
+    const unsigned long dhtReadInterval = 10000;   // 10s
+    const unsigned long dhtPrintInterval = 600000; // 10m
+
     static bool tempOutOfRangeReported = false;
+
+    // New: track last good samples + streak counter
+    static float lastGoodTempF = NAN;
+    static float lastGoodHumidity = NAN;
+    static uint8_t badReadStreak = 0;
 
     unsigned long currentMillis = millis();
 
-    // Check if it's time to read the sensor
     if (currentMillis - lastDHTReadMillis >= dhtReadInterval) {
         lastDHTReadMillis = currentMillis;
 
-        // Read temperature and humidity
         humidity = dht.readHumidity();
-        tempF = dht.readTemperature(true); // Read Fahrenheit directly
+        tempF   = dht.readTemperature(true); // Fahrenheit
 
-        // Check if the readings are valid
-        if (isnan(tempF) || isnan(humidity)) {
-            Serial.println("Failed to read from DHT sensor!");
-            publishDebugLog("DHT sensor reading failed.");
-            tempF = -999;  // Use a sentinel value to indicate failure
-            humidity = -999;
-            return; // Exit function if the readings are invalid
-        }
-        // Check for temperature out of range
-        if (tempF < -40 || tempF > 120) {
-            if (!tempOutOfRangeReported) {
-                // Publish only if not already reported
-                Serial.println("Temperature out of range!");
-                publishDebugLog("DHT temperature out of range: " + String(tempF));
-                tempOutOfRangeReported = true; // Set flag to prevent duplicate reporting
-            }
-            tempF = -999; // Set to sentinel value for out-of-range condition
-        } else {
-            // Reset the flag if temperature is back in range
-            if (tempOutOfRangeReported) {
-                Serial.println("Temperature back in range.");
-                tempOutOfRangeReported = false;
+        // Validate the reading
+        bool valid =
+            !isnan(tempF) &&
+            !isnan(humidity) &&
+            tempF > -40 && tempF < 120 &&
+            humidity >= 0 && humidity <= 100;
+
+        if (!valid) {
+            badReadStreak++;
+
+            // Only report after 2 consecutive bad values
+            if (badReadStreak == 2 && !tempOutOfRangeReported) {
+                publishDebugLog(
+                    "DHT invalid x2, last value tempF=" + String(tempF) +
+                    ", RH=" + String(humidity)
+                );
+                tempOutOfRangeReported = true;
             }
 
-            // Publish the temperature and humidity as JSON to MQTT
-            char jsonPayload[100];
-            snprintf(jsonPayload, sizeof(jsonPayload), "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-            publishMQTT(MQTT_PUB_TEMP, String(jsonPayload));
-            //publishDebugLog("Temperature and humidity published: " + String(jsonPayload));
+            // Hold last good reading if we have one
+            if (!isnan(lastGoodTempF)) {
+                tempF = lastGoodTempF;
+                humidity = lastGoodHumidity;
+            } else {
+                tempF = -999;
+                humidity = -999;
+            }
 
-            // Forward valid readings to the hourly average system
-            averageHourlyTemp(); // Ensure the reading is processed for summaries
+            return;  // Skip publish + averaging
         }
 
-        // Check if it's time to print the readings
+        // Good reading
+        badReadStreak = 0;
+
+        if (tempOutOfRangeReported) {
+            Serial.println("Temperature recovered.");
+            tempOutOfRangeReported = false;
+        }
+
+        // Save last good sample
+        lastGoodTempF = tempF;
+        lastGoodHumidity = humidity;
+
+        // Publish as JSON
+        char jsonPayload[100];
+        snprintf(jsonPayload, sizeof(jsonPayload),
+                 "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
+        publishMQTT(MQTT_PUB_TEMP, String(jsonPayload));
+
+        averageHourlyTemp();
+
+        // Print every 10 minutes
         if (currentMillis - lastDHTPrintMillis >= dhtPrintInterval) {
             lastDHTPrintMillis = currentMillis;
-
-            // Print temperature and humidity readings
-            if (tempF != -999 && humidity != -999) {
-                Serial.printf("Temperature: %.1f °F, Humidity: %.1f %%\n", tempF, humidity);
-            } else {
-                Serial.println("Temperature/Humidity data invalid. Check sensor.");
-            }
+            Serial.printf("Temperature: %.1f °F, Humidity: %.1f %%\n",
+                          tempF, humidity);
         }
-    }   
+    }
 }
+
 
 /** Resets the hourly count array at midnight */
 void resetHourlyCounts() {
@@ -1961,8 +2004,10 @@ void setup() {
     beamBState = (rawB == HIGH) ? 1 : 0;
 
     // Force MQTT to correct states on every reboot
-    publishMQTT(MQTT_PUB_MAG_SENSOR_STATE,  String(beamAState));
-    publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState));
+    publishMQTT(MQTT_PUB_MAG_SENSOR_STATE,  String(beamAState)); // deleteme
+    publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState)); // deleteme
+    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
+    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
 
     // Sync last-states so loop doesn't immediately republish
     lastBeamAState  = beamAState;
