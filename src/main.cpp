@@ -1444,36 +1444,36 @@ void detectCar() {
         publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState));
     }
 
-    // ---- MagSensor (Beam A) pre-trigger ----
+    // ---- Beam A pre-trigger ----
     if (beamAState == 1 && !beamATriggered) {
         beamATripTime = currentMillis;
         beamATriggered = true;
-        publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered (pre-beam check)!");
+        publishMQTT(MQTT_COUNTER_LOG,"Beam A broken (pre-trigger)!");
     }
 
     // If A triggered but B never followed within 750 ms, drop the pre-trigger
     if (beamATriggered && (currentMillis - beamATripTime > 750) && beamSensorHighTime == 0) {
         beamATriggered = false;
-        publishMQTT(MQTT_COUNTER_LOG,"MagSensor reset due to no BeamSensor activation.");
+        publishMQTT(MQTT_COUNTER_LOG,"Beam A pre-trigger cleared (no Beam B within 750 ms).");
     }
 
-    // ---- BeamSensor rising edge: start of event ----
+    // ---- Beam B rising edge ----
     if (beamBState == 1 && beamSensorHighTime == 0) {
         // Beam "HIGH" in logical sense = beam broken
         beamSensorHighTime = currentMillis;
         beamATriggered = false; // Reset mag sensor trigger for this car
-        publishMQTT(MQTT_COUNTER_LOG,"BeamSensor HIGH detected!");
+        publishMQTT(MQTT_COUNTER_LOG, "Beam B broken (event start).");
         systemReadyLogged = false;  // Reset "System ready" log flag
     }
 
-    // ---- BeamSensor falling edge: end of event ----
+    // ---- Beam B falling edge ----
     if (beamBState == 0 && beamSensorHighTime > 0) {
         unsigned long beamHighDuration = currentMillis - beamSensorHighTime;
         publishMQTT(MQTT_COUNTER_LOG,
-                    "BeamSensor LOW detected. Duration: " + String(beamHighDuration) + " ms");
+                    "Beam B clear. Broken duration: " + String(beamHighDuration) + " ms");
         publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(beamHighDuration)); // for statistics
 
-        // Check car conditions: Beam active for car not person or MagSensor triggered
+        // No-car case
         if (!carCounted && (beamHighDuration >= (unsigned long)carDetectMS || beamATriggered)) {
            unsigned long currentCarPassTime = millis();
            timeToPassMS = currentCarPassTime - beamSensorHighTime; 
@@ -1491,7 +1491,7 @@ void detectCar() {
            publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
         } else {
             publishMQTT(MQTT_COUNTER_LOG,
-                        "No car detected (Beam duration too short or no MagSensor trigger).");
+                        "No car detected (Beam B duration too short or no Beam A pre-trigger).");
         }
 
         // Reset beam timing and mag sensor state
