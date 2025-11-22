@@ -2049,12 +2049,7 @@ void setup() {
     wifiMulti.addAP(secret_ssid_AP_5, secret_pass_AP_5);
     setup_wifi();  
 
-    // Initialize MQTT
-    //mqtt_client.setServer(mqtt_server, mqtt_port);
-    //mqtt_client.setCallback(callback);
 
-    // MQTT Reconnection with login credentials
-    MQTTreconnect(); // Ensure MQTT is connected
 
     //If RTC not present, stop and check battery
     if (! rtc.begin()) {
@@ -2089,6 +2084,9 @@ void setup() {
         bootTimestamp = "rtc-not-ready";
     }
     
+
+    // MQTT Reconnection with login credentials
+    MQTTreconnect(); // Ensure MQTT is connected
 
     // Both beams via optocouplers: HIGH = clear, LOW = broken 25-11-20 GAL
     pinMode(magSensorPin, INPUT);      // Beam A
