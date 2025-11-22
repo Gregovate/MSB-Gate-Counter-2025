@@ -3,14 +3,28 @@ Gate Counter by Greg Liebig greg@engrinnovations.com
 Initial Build 12/5/2023 12:15 pm
 Counts vehicles as they exit the park
 Connects to WiFi and updates RTC on Boot
-Uses an Optocoupler to read burried vehicle sensor for Ghost Controls Gate operating at 12V
+Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operating at 12V
 Purpose: suppliments Car Counter to improve traffic control and determine park capacity
-Uses an Optocoupler to read burried vehicle sensor for Ghost Controls Gate operating at 12V
+Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operating at 12V
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 
 /*
 ## BEGIN CHANGELOG ##
+25.11.22.1  Fixed build break after CarCounter parity merge by relocating new
+             dual-beam state-machine globals back to the main globals section.
+             Ensured beamATripTime_ms is globally visible for SD logging in countTheCar().
+             No logic changes from 25.11.22.0 — compile/order fix only.
+
+25.11.22.0  Replaced legacy timing-based car detection with CarCounter 2025 state-machine logic.
+             Added debounced raw beam sampling (50 ms) for stable A/B transitions.
+             Implemented 4-state detection flow (WAITING_FOR_CAR → A_BROKEN → BOTH_BROKEN → CAR_DETECTED)
+             matching CarCounter beam spacing and event timing.
+             Preserved all GateCounter MQTT topics, payloads, and TTP/BetweenCars reporting.
+             Integrated 750 ms A→B follow rule and retained carDetectMS duration threshold.
+             Eliminated early re-arm behavior responsible for double counts on long vehicles.
+             Beam polarity mapping unchanged (HIGH=broken, LOW=clear).
+
 25.11.21.1  Inverted beam polarity mapping to match 2025 optocoupler outputs
              (LOW=clear, HIGH=broken). Boot-state and detectCar() logic now align
              with field-tested behavior.
@@ -19,7 +33,6 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
              Removed obsolete mag-sensor debug events no longer valid with dual IR beams.
              Verified mapping for normally-HIGH IR optocoupler beams and preserved 2024-proven logic.
              Ensured initial beam states publish correctly on reboot to avoid stale MQTT data.
-
 25.11.20.5  Debugging Inpark Cars
 25.11.20.4  Restored the proven 2024 car-detection state machine and added proper
              input-polarity mapping for the new normally-HIGH IR beams via optocoupler.
@@ -147,7 +160,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "25.11.21.1"   // Firmware Version
+#define FWVersion "25.11.22.1"   // Firmware Version
 #define OTA_Title "Gate Counter" // OTA Title
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
@@ -204,27 +217,39 @@ char topicBase[60];
 #define MQTT_SUB_CARMS  "msb/traffic/GateCounter/carDetectMS"       // Reset sync time from magSensor trip to beamSensor Active
 #define MQTT_SUB_LOGGING "msb/traffic/GateCounter/loggingEnabled"     // toggle logging function
 
-// State Machine for Car Counting
-enum CarDetectionState {
-    IDLE,
-    MAG_SENSOR_TRIGGERED,
-    BEAM_SENSOR_VALIDATION,
-    VEHICLE_CONFIRMED
+/***** 2025 CarCounter-parity debounced state machine for GateCounter *****/
+
+// Debounce raw beams (defensive, same as CarCounter)
+const unsigned long debounceDelay = 50;  // ms; adjust 30–80 if needed
+bool stableRawA = HIGH;                 // stable debounced raw for Beam A
+bool stableRawB = HIGH;                 // stable debounced raw for Beam B
+unsigned long lastRawAChangeMs = 0;
+unsigned long lastRawBChangeMs = 0;
+
+// CarCounter-style states
+enum GateDetectState {
+    WAITING_FOR_CAR,
+    BEAM_A_BROKEN,
+    BOTH_BEAMS_BROKEN,
+    CAR_DETECTED
 };
-CarDetectionState carDetectionState = IDLE;
+GateDetectState gateDetectState = WAITING_FOR_CAR;
 
-unsigned long beamATripTime = 0;     // Time when the magnetometer was first triggered
-unsigned long beamSensorTripTime = 0;    // Time when the beam sensor was first triggered
-unsigned long lastCarExitTime = 0;       // Time when the last car exited (beam sensor went low)
-static int carDetectMS = 1200;           // Minimum wait duration for a vehicle to be confirmed
+// Timing / flags
+unsigned long beamATripTime_ms = 0;        // when Beam A first broke
+unsigned long bothBeamsBroken_ms = 0;      // when both beams confirmed broken
+unsigned long lastCarDetected_ms = 0;      // for betweenCars
+bool carPresentFlag = false;
+
 unsigned long timeToPassMS = 0;          // Time from start of detection to confirmation
-bool magSensorWasTriggered = false;      // Tracks if the magnetic sensor was triggered recently
-bool carPassed = false;                  // Tracks if a car has fully passed through
 
-// Track previous states for efficient MQTT publishing
-int prevbeamAState = -1;  // Start with -1 to ensure initial publishing
-int prevbeamBState = -1; // Start with -1 to ensure initial publishing
+// Filters / windows (match your proven behavior)
+const unsigned long minActivationDuration = 150; // ignore tiny blips
+const unsigned long maxABFollow_ms = 750;    
+static int carDetectMS = 1200;           // Minimum wait duration for a vehicle to be confirmed
 
+
+/***** OTA & WEBSERVER SETUP *****/
 AsyncWebServer server(80);     // Define Webserver
 String currentDirectory = "/"; // Current working directory
 
@@ -1373,7 +1398,7 @@ void countTheCar() {
     myFile.print(", ");
     myFile.print(tempF);
     myFile.print(" , ");
-    myFile.println(beamATripTime); //Prints millis when car is detected
+    myFile.println(beamATripTime_ms); //Prints millis when car is detected
     myFile.close();
     /*
     Serial.print(F("Car Saved to SD Card. Car Number = "));
@@ -1399,6 +1424,8 @@ void countTheCar() {
     Serial.println(fileName6);
   }
 } 
+
+
 // =========================================================
 // DUAL-BEAM CAR DETECTION 25-11-20 GAL
 // Beam A  (magSensorPin, 32)  : upstream beam
@@ -1411,142 +1438,142 @@ void countTheCar() {
 //   Continually Read state of sensors. REVISED 12/12/24 with new Through Beam Sensor 
 //   When the magSensor drops LOW during the IDLE state and beamSensor is also LOW, reset magSensorWasTriggered
 //   to prepare for a new car.*/
+
+
+/** GateCounter CarCounter-parity state machine (keeps MQTT messages) */
 void detectCar() {
-    // Read raw states: HIGH = clear, LOW = broken
-    int rawA = digitalRead(magSensorPin);     // Beam A
-    int rawB = digitalRead(beamSensorPin);    // Beam B
-
-    // Map to internal logic: 1 = broken, 0 = clear
-    beamAState  = (rawA == HIGH) ? 1 : 0;   // Beam A broken?
-    beamBState = (rawB == HIGH) ? 1 : 0;   // Beam B broken?
-
-    // Declare static variables for state tracking
-    static unsigned long beamSensorHighTime = 0;  // Time when BeamSensor goes "active" (broken)
-    static unsigned long beamATripTime  = 0;  // Time when MagSensor (Beam A) last triggered
-    static unsigned long lastCarPassTime    = 0;  // Time of the last car detection
-    static bool beamATriggered          = false;  // Tracks if MagSensor was triggered
-    static bool systemReadyLogged           = false;  // Tracks if "System ready" has been logged
-    static bool alarmTriggered              = false;  // Tracks if BeamSensor alarm has been triggered
-    static unsigned long lastAlarmPublishTime = 0;    // Time of the last alarm message publish
-    static bool carCounted                  = false;  // Prevent multiple counts per Beam A event
-
     unsigned long currentMillis = millis();
 
-    // Publish BeamSensor state changes
+    // Raw reads (25.11.21.1 VERIFIED): raw HIGH = broken, raw LOW = clear
+    bool rawA = digitalRead(magSensorPin);    // Beam A
+    bool rawB = digitalRead(beamSensorPin);   // Beam B
+
+    // ---- Debounce Beam A ----
+    if (rawA != stableRawA) {
+        if (currentMillis - lastRawAChangeMs >= debounceDelay) {
+            stableRawA = rawA;
+            lastRawAChangeMs = currentMillis;
+        }
+    } else {
+        lastRawAChangeMs = currentMillis;
+    }
+
+    // ---- Debounce Beam B ----
+    if (rawB != stableRawB) {
+        if (currentMillis - lastRawBChangeMs >= debounceDelay) {
+            stableRawB = rawB;
+            lastRawBChangeMs = currentMillis;
+        }
+    } else {
+        lastRawBChangeMs = currentMillis;
+    }
+
+    // Map to internal + MQTT semantics (unchanged from 25.11.21.1):
+    // 1 = broken, 0 = clear
+    beamAState = (stableRawA == HIGH) ? 1 : 0;
+    beamBState = (stableRawB == HIGH) ? 1 : 0;
+
+    // Publish stable state changes (same topics as now)
     if (beamBState != lastBeamBState) {
         lastBeamBState = beamBState;
         publishMQTT(MQTT_PUB_BEAM_SENSOR_STATE, String(beamBState));
     }
-
-    // Publish MagSensor state changes
     if (beamAState != lastBeamAState) {
         lastBeamAState = beamAState;
         publishMQTT(MQTT_PUB_MAG_SENSOR_STATE, String(beamAState));
     }
 
-    // ---- Beam A pre-trigger ----
-    if (beamAState == 1 && !beamATriggered) {
-        beamATripTime = currentMillis;
-        beamATriggered = true;
-        publishMQTT(MQTT_COUNTER_LOG,"Beam A broken (pre-trigger)!");
-    }
+    bool aBroken = (beamAState == 1);
+    bool bBroken = (beamBState == 1);
 
-    // If A triggered but B never followed within 750 ms, drop the pre-trigger
-    if (beamATriggered && (currentMillis - beamATripTime > 750) && beamSensorHighTime == 0) {
-        beamATriggered = false;
-        publishMQTT(MQTT_COUNTER_LOG,"Beam A pre-trigger cleared (no Beam B within 750 ms).");
-    }
+    switch (gateDetectState) {
 
-    // ---- Beam B rising edge ----
-    if (beamBState == 1 && beamSensorHighTime == 0) {
-        // Beam "HIGH" in logical sense = beam broken
-        beamSensorHighTime = currentMillis;
-        beamATriggered = false; // Reset mag sensor trigger for this car
-        publishMQTT(MQTT_COUNTER_LOG, "Beam B broken (event start).");
-        systemReadyLogged = false;  // Reset "System ready" log flag
-    }
-
-    // ---- Beam B falling edge ----
-    if (beamBState == 0 && beamSensorHighTime > 0) {
-        unsigned long beamHighDuration = currentMillis - beamSensorHighTime;
-        publishMQTT(MQTT_COUNTER_LOG,
-                    "Beam B clear. Broken duration: " + String(beamHighDuration) + " ms");
-        publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(beamHighDuration)); // for statistics
-
-        // No-car case
-        if (!carCounted && (beamHighDuration >= (unsigned long)carDetectMS || beamATriggered)) {
-           unsigned long currentCarPassTime = millis();
-           timeToPassMS = currentCarPassTime - beamSensorHighTime; 
-           
-           // Calculate time between cars if applicable
-           if (lastCarPassTime > 0) {
-               unsigned long timeBetweenCars = currentCarPassTime - lastCarPassTime;
-               publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars));
-           }
-
-           lastCarPassTime = currentCarPassTime; // Update last car pass time
-           countTheCar();  // Count the car
-           carCounted = true;  // lock out further counts until Beam A clears
-           publishMQTT(MQTT_COUNTER_LOG,"Car confirmed and counted!");
-           publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
-        } else {
-            publishMQTT(MQTT_COUNTER_LOG,
-                        "No car detected (Beam B duration too short or no Beam A pre-trigger).");
-        }
-
-        // Reset beam timing and mag sensor state
-        beamSensorHighTime = 0;
-        beamATriggered = false;
-    }
-
-    // // ---- MagSensor activations during BeamSensor HIGH ----
-    // if (beamAState == 1 && !beamATriggered && beamSensorHighTime > 0) {
-    //     beamATripTime = currentMillis;
-    //     beamATriggered = true;
-    //     publishMQTT(MQTT_COUNTER_LOG,"MagSensor triggered during BeamSensor HIGH!");
-    // }
-
-    // Log "System ready for next car" only once
-    if (beamSensorHighTime == 0 &&
-        beamAState == 0 &&
-        beamBState == 0 &&
-        !beamATriggered &&
-        !systemReadyLogged) {
-
-        carCounted = false;  // allow next car once both beams are clear again
-        publishMQTT(MQTT_COUNTER_LOG,"System ready for next car.");
-        systemReadyLogged = true;
-    }
-
-    /*
-    // Beam Sensor Alarm (still commented out; can be re-enabled later)
-    if (beamBState == 1) {
-        if (beamSensorHighTime == 0) {
-            beamSensorHighTime = currentMillis; // Start timing
-        } else if (currentMillis - beamSensorHighTime >= 180000) {
-            // If HIGH for over 3 minutes
-            if (!alarmTriggered) {
-                alarmTriggered = true;
-                publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor stuck HIGH for over 3 minutes!");
-                lastAlarmPublishTime = currentMillis; // Record the time of the alarm
+        case WAITING_FOR_CAR:
+            // Start on Beam A broken while B is still clear
+            if (aBroken && !bBroken) {
+                beamATripTime_ms = currentMillis;
+                gateDetectState = BEAM_A_BROKEN;
+                publishMQTT(MQTT_COUNTER_LOG, "Beam A broken (event start).");
             }
-            // Republish the alarm message every 5 minutes
-            else if (currentMillis - lastAlarmPublishTime >= 300000) {
-                publishMQTT(MQTT_PUB_HELLO, "ALARM: BeamSensor still stuck HIGH.");
-                lastAlarmPublishTime = currentMillis; // Update the time of the last publish
+            break;
+
+        case BEAM_A_BROKEN:
+            // Beam B follows → validate minimum activation
+            if (bBroken) {
+                unsigned long timeBeamsHigh = currentMillis - beamATripTime_ms;
+
+                if (timeBeamsHigh >= minActivationDuration) {
+                    bothBeamsBroken_ms = currentMillis;
+                    carPresentFlag = true;
+                    gateDetectState = BOTH_BEAMS_BROKEN;
+                    publishMQTT(MQTT_COUNTER_LOG, "State changed: Both beams broken.");
+                }
             }
-        }
-    } else {
-        // BeamSensor is LOW, reset timing and clear the alarm if it was triggered
-        if (alarmTriggered) {
-            publishMQTT(MQTT_PUB_HELLO, "BeamSensor alarm cleared: Sensor is LOW.");
-            alarmTriggered = false;
-        }
-        beamSensorHighTime = 0;
+            // If A clears before B breaks → reset
+            else if (!aBroken) {
+                gateDetectState = WAITING_FOR_CAR;
+                publishMQTT(MQTT_COUNTER_LOG, "Beam A cleared before Beam B. Reset.");
+            }
+
+            // If B never follows within 750 ms → reset (your proven rule)
+            if (!bBroken && (currentMillis - beamATripTime_ms > maxABFollow_ms)) {
+                gateDetectState = WAITING_FOR_CAR;
+                publishMQTT(MQTT_COUNTER_LOG, "Beam A timeout (no Beam B within 750 ms). Reset.");
+            }
+            break;
+
+        case BOTH_BEAMS_BROKEN:
+            // Stuck-vehicle alarm (uses your existing timeout)
+            if ((currentMillis - beamATripTime_ms) >= (unsigned long)gateCounterTimeout) {
+                publishMQTT(MQTT_PUB_HELLO, "Check Gate Counter! Vehicle stuck.");
+            }
+
+            // When Beam B clears, validate duration and move to count
+            if (!bBroken && carPresentFlag) {
+                unsigned long brokenDuration = currentMillis - bothBeamsBroken_ms;
+
+                publishMQTT(
+                    MQTT_COUNTER_LOG,
+                    "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
+                );
+                publishMQTT(MQTT_PUB_BEAMHIGH_MS, String(brokenDuration));
+
+                if (brokenDuration >= (unsigned long)carDetectMS) {
+                    gateDetectState = CAR_DETECTED;
+                } else {
+                    // Not a car → reset
+                    carPresentFlag = false;
+                    gateDetectState = WAITING_FOR_CAR;
+                    publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
+                }
+            }
+            break;
+
+        case CAR_DETECTED:
+            if (carPresentFlag) {
+                countTheCar();
+
+                // TTP from Beam A broken to Beam B clear
+                timeToPassMS = currentMillis - beamATripTime_ms;
+                publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
+                publishMQTT(MQTT_COUNTER_LOG, "Car confirmed and counted!");
+
+                // Between cars
+                if (lastCarDetected_ms > 0) {
+                    unsigned long betweenCars = currentMillis - lastCarDetected_ms;
+                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(betweenCars));
+                }
+                lastCarDetected_ms = currentMillis;
+
+                carPresentFlag = false;
+                gateDetectState = WAITING_FOR_CAR;
+                publishMQTT(MQTT_COUNTER_LOG, "System ready for next car.");
+            }
+            break;
     }
-    */
 }
 // END CAR DETECTION
+
 
 
 // CHECK AND CREATE FILES on SD Card and WRITE HEADERS if Needed
