@@ -11,6 +11,9 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 
 /*
 ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.22.5  Removed heatbeat MQTT topic ccountcar() to KeepMqttAlive() function to publish current counts
+             every 30 seconds if no car is counted, ensuring remote dashboards
+             stay updated during low traffic periods.
 25.11.22.4  Added retained “online” MQTT debug event on connect with timestamp,
              SSID, RSSI, and IP for remote diagnostics (publishDebugEvent("online", ...)).
              Updated HELLO banner to include boot timestamp (“Gate Counter ONLINE @ …”).
@@ -173,7 +176,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "25.11.22.4"   // Firmware Version
+#define FWVersion "25.11.22.5"   // Firmware Version
 #define OTA_Title "Gate Counter" // OTA Title
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
@@ -807,20 +810,36 @@ void publishDebugEvent(const char* event, const String& details, bool retainFlag
     publishMQTT(MQTT_DEBUG_LOG, String(buf), retainFlag);
 }
 
-// Used to publish current counts to update Car Counter every 30 seconds if no car is counted
+// Used to publish current counts to update GATE Counter every 30 seconds if no car is counted
 void KeepMqttAlive() {
 
-    // GAL 25-11-22: publish temp/RH as JSON (match HA templates)
+    // ---- Heartbeat (retained, ONLY here) ----
+    publishMQTT(
+        MQTT_PUB_HEARTBEAT,
+        String("{\"boot\":\"") + bootTimestamp +
+        "\",\"now\":\"" + getRtcTimestamp() +
+        "\",\"exit\":" + totalDailyCars +
+        ",\"inpark\":" + inParkCars +
+        ",\"rssi\":" + WiFi.RSSI() +
+        "}",
+        true
+    );
+
+    // ---- Temp/RH as JSON (retained to match HA templates) ----
     char jsonPayload[100];
     snprintf(jsonPayload, sizeof(jsonPayload),
-                "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-    publishMQTT(MQTT_PUB_TEMP, String(jsonPayload));
+             "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
+    publishMQTT(MQTT_PUB_TEMP, String(jsonPayload), true);
 
-    // GAL 25-11-22: retain core exit counts
+    // ---- Retained core counts ----
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);  // keep if you want retained In-Park
+    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
 
-    publishMQTT(MQTT_PUB_WIFI_RSSI, String(WiFi.RSSI()));
+    // ---- WiFi diagnostics (retained) ----
+    publishMQTT(MQTT_PUB_WIFI_RSSI, String(WiFi.RSSI()), true);
+    publishMQTT(MQTT_PUB_WIFI_SSID, WiFi.SSID(),        true);
+    publishMQTT(MQTT_PUB_WIFI_IP,   WiFi.localIP().toString(), true);
+
     start_MqttMillis = millis();
 }
 
@@ -1521,15 +1540,7 @@ void countTheCar() {
     Serial.print(F(" Cars in Park = "));
     Serial.println(inParkCars);  
     */
-    publishMQTT(
-        MQTT_PUB_HEARTBEAT,
-        String("{\"boot\":\"") + bootTimestamp +
-        "\",\"now\":\"" + getRtcTimestamp() +
-        "\",\"exit\":" + totalDailyCars +
-        ",\"inpark\":" + inParkCars +
-        ",\"rssi\":" + WiFi.RSSI() +
-        "}"
-    );
+
     publishMQTT(MQTT_PUB_TIME, now.toString(buf2));
     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars));
