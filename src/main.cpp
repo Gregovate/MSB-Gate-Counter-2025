@@ -8,7 +8,8 @@ Purpose: suppliments Car Counter to improve traffic control and determine park c
 Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operating at 12V
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
-
+#define OTA_Title "Gate Counter" // OTA Title
+#define FWVersion "25.11.22.5"   // Firmware Version
 /*
 ## BEGIN CHANGELOG GATE COUNTER ##
 25.11.22.5  Removed heatbeat MQTT topic ccountcar() to KeepMqttAlive() function to publish current counts
@@ -176,8 +177,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #include <queue>  // Include queue for storing messages
 
 // ******************** CONSTANTS *******************
-#define FWVersion "25.11.22.5"   // Firmware Version
-#define OTA_Title "Gate Counter" // OTA Title
+
 #define magSensorPin 32 // Pin for Magnotometer Sensor
 #define beamSensorPin 33  //Pin for Reflective Beam Sensor
 #define DHTPIN 4       // GPIO pin for the DHT22
