@@ -9,9 +9,23 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.22.5"   // Firmware Version
-/*
-## BEGIN CHANGELOG GATE COUNTER ##
+#define FWVersion "25.11.24.0"   // Firmware Version
+
+/*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.24.0  Aligned Gate Counter with Car Counter 2025 MQTT/state model.
+             • Converted all state MQTT publishes to retained (ExitTotal, InParkCars,
+               ShowTotal, DayOfMonth, DaysRunning, HourlyCounts).
+             • Fixed multiple duplicate publishes and missing retain flags.
+             • Reworked get* /save* SD routines for deterministic state reload on reboot.
+             • Implemented retained hourly bucket publishes after reboot.
+             • Standardized all dynamic MQTT topics to 2025 tree (…/Cars/Hourly/HH).
+             • Corrected MQTT queue behavior and removed non-retained state leaks.
+             • Cleaned up saveDailyTotal(), getDailyTotal(), saveDaysRunning(),
+               getDaysRunning(), saveShowTotal(), getShowTotal(), saveDayOfMonth(),
+               getDayOfMonth() and saveHourlyCounts().
+             • Fixed broken brace in saveDailyShowSummary() that caused
+               downstream function nesting compile errors.
+
 25.11.22.5  Removed heatbeat MQTT topic ccountcar() to KeepMqttAlive() function to publish current counts
              every 30 seconds if no car is counted, ensuring remote dashboards
              stay updated during low traffic periods.
@@ -143,8 +157,9 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 24.10.17.2 added #define FWVersion
 24.10.15.0 Fixed Pin problem. Beam & mag sensor swapped causing the problems. Purpose: suppliments Car Counter to improve traffic control and determine park capacity
 23.12.13.0 Changed time format YYYY-MM-DD hh:mm:ss 12/13/23
-## END CHANGELOG ## 
 */
+## END CHANGELOG ## 
+
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -196,48 +211,69 @@ String bootTimestamp = "";  // GAL 25-11-22: Store boot timestamp for logging
 // **************************************************
 
 /***** MQTT TOPIC DEFINITIONS *****/
-#define THIS_MQTT_CLIENT "espGateCounter" // Look at line 90 and set variable for WiFi Client secure & PubSubCLient 12/23/23
-int mqttKeepAlive = 30; // publish temp every x seconds to keep MQTT client connected
-// Publishing Topics 
+#define THIS_MQTT_CLIENT "espGateCounter" // Look at line 90 and set variable for WiFi Client secure & PubSubClient 12/23/23
+int mqttKeepAlive = 30; // publish select values every x seconds to keep MQTT client connected
+
+// Base path
 char topic[60];
 char topicBase[60];
 #define topic_base_path "msb/traffic/GateCounter"
-#define MQTT_PUB_HELLO "msb/traffic/GateCounter/hello"
-#define MQTT_PUB_TEMP "msb/traffic/GateCounter/temp"
-#define MQTT_PUB_TIME "msb/traffic/GateCounter/time"
-#define MQTT_PUB_EXIT_CARS "msb/traffic/GateCounter/ExitTotal"
-#define MQTT_PUB_CARS_HOURLY  "msb/traffic/GateCounter/Cars"
-#define MQTT_PUB_INPARK_CARS "msb/traffic/GateCounter/inParkCars"
-#define MQTT_PUB_SUMMARY "msb/traffic/GateCounter/Summary"
-#define MQTT_PUB_DAYOFMONTH "msb/traffic/GateCounter/DayOfMonth"
-#define MQTT_PUB_SHOWTOTAL "msb/traffic/GateCounter/ShowTotal"
-#define MQTT_PUB_TTP "msb/traffic/GateCounter/TTP"
-#define MQTT_PUB_DAYSRUNNING "msb/traffic/GateCounter/DaysRunning"
-#define MQTT_DEBUG_LOG "msb/traffic/GateCounter/debuglog"
-#define MQTT_COUNTER_LOG "msb/traffic/GateCounter/CounterLog"
-#define MQTT_PUB_BETWEENCARS_MS "msb/traffic/GateCounter/betweenCars"
-#define MQTT_PUB_HEARTBEAT "msb/traffic/GateCounter/heartbeat"
+
+// =====================================================
+// NEW 2025 TOPIC TREE (NO LEGACY)
+// Buckets: /System /Env /Cars /Calendar /Sensors /Config
+// =====================================================
+
+// ---------------- SYSTEM ----------------
+#define MQTT_PUB_HELLO       "msb/traffic/GateCounter/System/hello"
+#define MQTT_PUB_FIRMWARE    "msb/traffic/GateCounter/System/firmware"
+#define MQTT_PUB_TIME        "msb/traffic/GateCounter/System/time"
+#define MQTT_PUB_HEARTBEAT   "msb/traffic/GateCounter/System/heartbeat"
+#define MQTT_DEBUG_LOG       "msb/traffic/GateCounter/System/debug"
+#define MQTT_COUNTER_LOG     "msb/traffic/GateCounter/System/CounterLog"
+
+// WiFi diagnostics (retained)
+#define MQTT_PUB_WIFI_SSID   "msb/traffic/GateCounter/System/wifi_ssid"
+#define MQTT_PUB_WIFI_RSSI   "msb/traffic/GateCounter/System/wifi_rssi"
+#define MQTT_PUB_WIFI_IP     "msb/traffic/GateCounter/System/wifi_ip"
+
+// ---------------- ENV ----------------
+// retained JSON: {"tempF": xx.x, "humidity": xx.x}
+#define MQTT_PUB_TEMP        "msb/traffic/GateCounter/Env/tempHumidity"
+
+// ---------------- CARS ----------------
+#define MQTT_PUB_EXIT_CARS       "msb/traffic/GateCounter/Cars/ExitTotal"
+#define MQTT_PUB_INPARK_CARS     "msb/traffic/GateCounter/Cars/InParkCars"
+#define MQTT_PUB_SHOWTOTAL       "msb/traffic/GateCounter/Cars/ShowTotal"
+#define MQTT_PUB_CARS_HOURLY     "msb/traffic/GateCounter/Cars/Hourly"
+
+// ---------------- CALENDAR ----------------
+#define MQTT_PUB_DAYOFMONTH  "msb/traffic/GateCounter/Calendar/DayOfMonth"
+#define MQTT_PUB_DAYSRUNNING "msb/traffic/GateCounter/Calendar/DaysRunning"
+#define MQTT_PUB_SUMMARY     "msb/traffic/GateCounter/Calendar/Summary"
+
+// ---------------- SENSORS ----------------
+#define MQTT_PUB_TTP             "msb/traffic/GateCounter/Sensors/TTP"
+#define MQTT_PUB_BETWEENCARS_MS  "msb/traffic/GateCounter/Sensors/betweenCars"
 
 // 2025 dual-beam naming (A upstream, B downstream)
-#define MQTT_PUB_BEAM_A_STATE     "msb/traffic/GateCounter/beamAState"
-#define MQTT_PUB_BEAM_B_STATE     "msb/traffic/GateCounter/beamBState"
-#define MQTT_PUB_BEAM_AB_MS       "msb/traffic/GateCounter/beamAB_ms"
-#define MQTT_PUB_BEAM_B_BROKEN_MS "msb/traffic/GateCounter/beamB_broken_ms"
+#define MQTT_PUB_BEAM_A_STATE     "msb/traffic/GateCounter/Sensors/beamAState"
+#define MQTT_PUB_BEAM_B_STATE     "msb/traffic/GateCounter/Sensors/beamBState"
+#define MQTT_PUB_BEAM_AB_MS       "msb/traffic/GateCounter/Sensors/beamAB_ms"
+#define MQTT_PUB_BEAM_B_BROKEN_MS "msb/traffic/GateCounter/Sensors/beamB_broken_ms"
 
-#define MQTT_PUB_FIRMWARE "msb/traffic/GateCounter/firmware"
-#define MQTT_PUB_WIFI_SSID "msb/traffic/GateCounter/wifi_ssid"
-#define MQTT_PUB_WIFI_RSSI "msb/traffic/GateCounter/wifi_rssi"
-#define MQTT_PUB_WIFI_IP   "msb/traffic/GateCounter/wifi_ip"
+// ---------------- CONFIG (subscribed setpoints/toggles) ----------------
+#define MQTT_SUB_GATE_RESET_DAILY   "msb/traffic/GateCounter/Config/resetDailyCount"
+#define MQTT_SUB_GATE_RESET_SHOW    "msb/traffic/GateCounter/Config/resetShowCount"
+#define MQTT_SUB_GATE_RESET_DOM     "msb/traffic/GateCounter/Config/resetDayOfMonth"
+#define MQTT_SUB_GATE_RESET_DAYS    "msb/traffic/GateCounter/Config/resetDaysRunning"
+#define MQTT_SUB_GATE_TIMEOUT       "msb/traffic/GateCounter/Config/gateCounterTimeout"
+#define MQTT_SUB_CARMS              "msb/traffic/GateCounter/Config/carDetectMS"
+#define MQTT_SUB_LOGGING            "msb/traffic/GateCounter/Config/loggingEnabled"
 
-// Subscribing Topics (to reset values)
-#define MQTT_SUB_TOPIC0  "msb/traffic/CarCounter/EnterTotal"          // get enter counts from carCounter
-#define MQTT_SUB_TOPIC1  "msb/traffic/GateCounter/resetDailyCount"    // Reset Daily counter
-#define MQTT_SUB_TOPIC2  "msb/traffic/GateCounter/resetShowCount"     // Resets Show Counter
-#define MQTT_SUB_TOPIC3  "msb/traffic/GateCounter/resetDayOfMonth"    // Reset Calendar Day
-#define MQTT_SUB_TOPIC4  "msb/traffic/GateCounter/resetDaysRunning"   // Reset Days Running
-#define MQTT_SUB_TOPIC5  "msb/traffic/GateCounter/gateCounterTimeout" // Reset Timeout if car leaves detection Zone
-#define MQTT_SUB_CARMS  "msb/traffic/GateCounter/carDetectMS"       // Reset sync time from magSensor trip to beamSensor Active
-#define MQTT_SUB_LOGGING "msb/traffic/GateCounter/loggingEnabled"     // toggle logging function
+// ---------------- CAR COUNTER INPUTS (new tree) ----------------
+#define MQTT_SUB_CC_ENTER_TOTAL     "msb/traffic/CarCounter/Cars/EnterTotal"
+#define MQTT_SUB_CC_SHOW_TOTAL      "msb/traffic/CarCounter/Cars/ShowTotal"
 
 /***** 2025 CarCounter-parity debounced state machine for GateCounter *****/
 
@@ -881,22 +917,26 @@ void MQTTreconnect() {
                 display.println("MQTT Connect");
                 display.display();
                 Serial.println("connected!");
-                Serial.println("Waiting for Car");                
-                // Once connected, publish an announcement
-                publishMQTT(MQTT_PUB_HELLO, String("Gate Counter ONLINE @ ") + bootTimestamp);
-                publishMQTT(MQTT_PUB_FIRMWARE, FWVersion);  
-                // GAL 25-11-22: publish temp/RH as JSON on connect (match HA templates)
+                Serial.println("Waiting for Car");
+
+                // Once connected, publish an announcement (retained)
+                publishMQTT(MQTT_PUB_HELLO, String("Gate Counter ONLINE @ ") + bootTimestamp, true);
+                publishMQTT(MQTT_PUB_FIRMWARE, FWVersion, true);
+
+                // publish temp/RH JSON on connect (retained)
                 char jsonPayload[100];
                 snprintf(jsonPayload, sizeof(jsonPayload),
                         "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-                publishMQTT(MQTT_PUB_TEMP, String(jsonPayload));
+                publishMQTT(MQTT_PUB_TEMP, String(jsonPayload), true);
+
+                // retained core counts
                 publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
                 publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
 
-                // ===== WiFi telemetry (match Car Counter improvements) =====
-                publishMQTT(MQTT_PUB_WIFI_SSID, WiFi.SSID());
-                publishMQTT(MQTT_PUB_WIFI_RSSI, String(WiFi.RSSI()));
-                publishMQTT(MQTT_PUB_WIFI_IP,   WiFi.localIP().toString());
+                // ===== WiFi telemetry (retained) =====
+                publishMQTT(MQTT_PUB_WIFI_SSID, WiFi.SSID(), true);
+                publishMQTT(MQTT_PUB_WIFI_RSSI, String(WiFi.RSSI()), true);
+                publishMQTT(MQTT_PUB_WIFI_IP,   WiFi.localIP().toString(), true);
 
                 // GAL 25-11-22: retained online snapshot for remote debugging
                 publishDebugEvent(
@@ -907,16 +947,18 @@ void MQTTreconnect() {
                     true
                 );
 
-                // Subscribe to necessary topics
-                mqtt_client.subscribe(MQTT_PUB_HELLO);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC0);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC1);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC2);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC3);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC4);
-                mqtt_client.subscribe(MQTT_SUB_TOPIC5);
+                // Subscribe to necessary topics (NEW TREE)
+                mqtt_client.subscribe(MQTT_SUB_CC_ENTER_TOTAL);
+                mqtt_client.subscribe(MQTT_SUB_CC_SHOW_TOTAL);
+
+                mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAILY);
+                mqtt_client.subscribe(MQTT_SUB_GATE_RESET_SHOW);
+                mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DOM);
+                mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAYS);
+                mqtt_client.subscribe(MQTT_SUB_GATE_TIMEOUT);
                 mqtt_client.subscribe(MQTT_SUB_CARMS);
                 mqtt_client.subscribe(MQTT_SUB_LOGGING);
+
 
                 // Log subscriptions
                 Serial.println("Subscribed to MQTT topics.");
@@ -967,9 +1009,8 @@ void checkWiFiConnection() {
 
 // =========== GET SAVED SETUP FROM SD CARD ==========
 // open DAILYTOT.txt to get initial dailyTotal value
-void getDailyTotal()   {
-    // open DAILYTOT.txt to get initial dailyTotal value
-    myFile = SD.open(fileName1,FILE_READ);
+void getDailyTotal() {
+    myFile = SD.open(fileName1, FILE_READ);
     if (myFile) {
         while (myFile.available()) {
             totalDailyCars = myFile.parseInt(); // read total
@@ -977,64 +1018,83 @@ void getDailyTotal()   {
             Serial.println(totalDailyCars);
         }
         myFile.close();
-        publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
-    }  
-    else  {
+
+        // Recalculate in-park value on reboot
+        inParkCars = carCounterCars - totalDailyCars;
+
+        // GAL 25-11-24: retained state publishes
+        publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+        publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+
+    } else {
         Serial.print("SD Card: Cannot open the file: ");
         Serial.println(fileName1);
     }
-} // end getDailyTotal
+}
+
 
 /** Get season total cars since show opened */
 void getShowTotal() {
-  myFile = SD.open(fileName2,FILE_READ);
-  if (myFile) {
-    while (myFile.available()) {
-      totalShowCars = myFile.parseInt(); // read total
-      Serial.print(" Total Show cars from file = ");
-      Serial.println(totalShowCars);
+    myFile = SD.open(fileName2, FILE_READ);
+    if (myFile) {
+        while (myFile.available()) {
+            totalShowCars = myFile.parseInt(); // read total
+            Serial.print(" Total Show cars from file = ");
+            Serial.println(totalShowCars);
+        }
+        myFile.close();
+
+        // GAL 25-11-24: retained state publish
+        publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
+
+    } else {
+        Serial.print(F("SD Card: Cannot open the file: "));
+        Serial.println(fileName2);
     }
-    myFile.close();
-    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars));
-  } else {
-    Serial.print(F("SD Card: Cannot open the file: "));
-    Serial.println(fileName2);
-  }
 }
 
-// get the last calendar day used for reset daily counts)
-void getDayOfMonth() {
-    myFile = SD.open(fileName3,FILE_READ);
-    if (myFile) {
-      while (myFile.available()) {
-        lastDayOfMonth = myFile.parseInt(); // read day Number
-        Serial.print(" Calendar Day = ");
-        Serial.println(lastDayOfMonth);
-      }
-      myFile.close();
-      publishMQTT(MQTT_PUB_DAYOFMONTH, String(lastDayOfMonth));
-    } else {
-      Serial.print(F("SD Card: Cannot open the file: "));
-      Serial.println(fileName3);
-    }
-} 
 
-// Days the show has been running)
-void getDaysRunning() {
-  myFile = SD.open(fileName4,FILE_READ);
-  if (myFile) {
-    while (myFile.available()) {
-      daysRunning = myFile.parseInt(); // read day Number
-      Serial.print(" Days Running = ");
-      Serial.println(daysRunning);
+// get the last calendar day used for reset daily counts
+void getDayOfMonth() {
+    myFile = SD.open(fileName3, FILE_READ);
+    if (myFile) {
+        while (myFile.available()) {
+            lastDayOfMonth = myFile.parseInt(); // read day Number
+            Serial.print(" Calendar Day = ");
+            Serial.println(lastDayOfMonth);
+        }
+        myFile.close();
+
+        // GAL 25-11-24: retained state publish
+        publishMQTT(MQTT_PUB_DAYOFMONTH, String(lastDayOfMonth), true);
+
+    } else {
+        Serial.print(F("SD Card: Cannot open the file: "));
+        Serial.println(fileName3);
     }
-    myFile.close();
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning));
-  } else {
-      Serial.print(F("SD Card: Cannot open the file: "));
-      Serial.println(fileName4);
-  }
-} 
+}
+
+
+// Days the show has been running
+void getDaysRunning() {
+    myFile = SD.open(fileName4, FILE_READ);
+    if (myFile) {
+        while (myFile.available()) {
+            daysRunning = myFile.parseInt(); // read day Number
+            Serial.print(" Days Running = ");
+            Serial.println(daysRunning);
+        }
+        myFile.close();
+
+        // GAL 25-11-24: retained state publish
+        publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
+
+    } else {
+        Serial.print(F("SD Card: Cannot open the file: "));
+        Serial.println(fileName4);
+    }
+}
+
 
 /** Get hourly car counts on reboot */
 void getHourlyData() {
@@ -1072,17 +1132,31 @@ void getHourlyData() {
             if (parsedValues == 24) {
                 Serial.println("Successfully loaded hourly data for today.");
                 publishMQTT(MQTT_DEBUG_LOG, "Successfully loaded hourly data for today.");
+
                 for (int i = 0; i < 24; i++) {
+
+                    // ---- Serial debug (keep) ----
                     Serial.printf("Hour %02d: %d cars\n", i, hourlyCount[i]);
-                    char debugMsg[50];
-                    snprintf(debugMsg, sizeof(debugMsg), "Hour %02d: %d cars", i, hourlyCount[i]);
-                    publishMQTT(MQTT_DEBUG_LOG, String(debugMsg));
+
+                    // ---- NEW: publish retained hourly value for dashboards ----
+                    char hourlyTopic[120];
+                    snprintf(hourlyTopic, sizeof(hourlyTopic),
+                            "%s/%02d", MQTT_PUB_CARS_HOURLY, i);
+                    publishMQTT(hourlyTopic, String(hourlyCount[i]), true);
+
+                    // ---- OPTIONAL: quiet MQTT debug to avoid 24-line spam ----
+                    // Remove or comment out the noisy per-hour debug:
+                    //
+                    // char debugMsg[50];
+                    // snprintf(debugMsg, sizeof(debugMsg), "Hour %02d: %d cars", i, hourlyCount[i]);
+                    // publishMQTT(MQTT_DEBUG_LOG, String(debugMsg));
                 }
             } else {
                 Serial.println("Error parsing today's row. Resetting hourly data.");
                 publishMQTT(MQTT_DEBUG_LOG, "Error parsing today's row. Resetting hourly data.");
                 memset(hourlyCount, 0, sizeof(hourlyCount)); // Reset to zeros
             }
+
             break; // Exit loop after processing today's row
         }
     }
@@ -1098,22 +1172,24 @@ void getHourlyData() {
 /***** UPDATE and SAVE TOTALS TO SD CARD *****/
 /** Save the daily Total of cars counted */
 void saveDailyTotal() {
-  myFile = SD.open(fileName1,FILE_WRITE);
-  if (myFile) {  // check for an open failure
-     myFile.print(totalDailyCars);
-     myFile.close();
-     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
-     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars));
-  } else {
-      Serial.print(F("SD Card: Cannot open the file: "));
-      Serial.println(fileName1);
-  } 
-  publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
+    myFile = SD.open(fileName1, FILE_WRITE);
+    if (myFile) {
+        myFile.print(totalDailyCars);
+        myFile.close();
+    } else {
+        Serial.print(F("SD Card: Cannot open the file: "));
+        Serial.println(fileName1);
+    }
+
+    // GAL 25-11-24: Retained state publishes
+    publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
 }
+
 
 /* Save the grand total cars file for season  */
 void saveShowTotal() {  
-    myFile = SD.open(fileName2,FILE_WRITE);
+    myFile = SD.open(fileName2, FILE_WRITE);
     if (myFile) {
         myFile.print(totalShowCars);
         myFile.close();
@@ -1121,25 +1197,31 @@ void saveShowTotal() {
         Serial.print(F("SD Card: Cannot open the file: "));
         Serial.println(fileName2);
     }
-    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars));  
+
+    // GAL 25-11-24: retained state publish
+    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);  
 }
 
-// Save the calendar day to file ----- */
+
+// Save the calendar day to file
 void saveDayOfMonth() {
-    myFile = SD.open(fileName3,FILE_WRITE);
+    myFile = SD.open(fileName3, FILE_WRITE);
     if (myFile) {
         myFile.print(dayOfMonth);
         myFile.close();
-      } else {
+    } else {
         Serial.print(F("SD Card: Cannot open the file: "));
         Serial.println(fileName3);
     }
-      publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth));
+
+    // GAL 25-11-24: Retained state publish (required)
+    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
 }
+
 
 /** Save number of days the show has been running */
 void saveDaysRunning() {
-    myFile = SD.open(fileName4,FILE_WRITE);
+    myFile = SD.open(fileName4, FILE_WRITE);
     if (myFile) {
       myFile.print(daysRunning);
       myFile.close();
@@ -1147,8 +1229,11 @@ void saveDaysRunning() {
       Serial.print(F("SD Card: Cannot open the file: "));
       Serial.println(fileName4);
     }
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning));
+
+    // retained state publish (NEW tree topic already correct)
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
 }
+
 
 // Save cars counted each hour in the event of a reboot
 // Refactored saveHourlyCounts function
@@ -1186,10 +1271,6 @@ void saveHourlyCounts() {
                 }
                 updatedContent += "\n";
 
-                // Publish current hour's data to MQTT
-                char topic[60];
-                snprintf(topic, sizeof(topic), "%s/hour%02d", MQTT_PUB_CARS_HOURLY, currentHour);
-                publishMQTT(topic, String(hourlyCount[currentHour]));
             } else {
                 updatedContent += line + "\n"; // Preserve other rows
             }
@@ -1205,16 +1286,20 @@ void saveHourlyCounts() {
         }
         updatedContent += "\n";
 
-        // Publish current hour's data to MQTT
-        char topic[60];
-        snprintf(topic, sizeof(topic), "%s/hour%02d", MQTT_PUB_CARS_HOURLY, currentHour);
-        publishMQTT(topic, String(hourlyCount[currentHour]));
-
         // Publish debug log
         char debugMessage[100];
         snprintf(debugMessage, sizeof(debugMessage), "Hourly data saved for hour %02d.", currentHour);
         publishMQTT(MQTT_DEBUG_LOG, debugMessage);
     }
+
+    // -------------------------------------------------
+    // GAL 25-11-24: Publish current hour's data to MQTT
+    // NEW tree: msb/traffic/GateCounter/Cars/Hourly/07
+    // -------------------------------------------------
+    char hourlyTopic[120];
+    snprintf(hourlyTopic, sizeof(hourlyTopic),
+             "%s/%02d", MQTT_PUB_CARS_HOURLY, currentHour);
+    publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
     // Write updated content back to the file
     file = SD.open(fileName5, FILE_WRITE);
@@ -1226,6 +1311,7 @@ void saveHourlyCounts() {
         Serial.println("Failed to open GateHourlyData.csv for writing.");
     }
 }
+
 
 // Save and Publish Show Totals
 void saveDailyShowSummary() {
@@ -1290,19 +1376,20 @@ void saveDailyShowSummary() {
                        showAverageTemp); // Average temperature during show hours
     summaryFile.close();
 
-    // Publish show summary data to MQTT
-    publishMQTT(MQTT_PUB_SUMMARY, String("Date: ") + dateBuffer +
-                                        ", DaysRunning: " + daysRunning +
-                                        ", Before5: " + totalBefore5 +
-                                        ", 6PM: " + cumulative6PM +
-                                        ", 7PM: " + cumulative7PM +
-                                        ", 8PM: " + cumulative8PM +
-                                        ", 9PM: " + cumulative9PM +
-                                        ", ShowTotal: " + totalShowCars +
-                                        ", ShowAvgTemp: " + String(showAverageTemp, 1));
-
-    Serial.printf("Daily show summary written: %s, DaysRunning: %d, Before5: %d, 6PM: %d, 7PM: %d, 8PM: %d, 9PM: %d, ShowTotal: %d, Avg Temp: %.1f°F.\n",
-                  dateBuffer, daysRunning, totalBefore5, cumulative6PM, cumulative7PM, cumulative8PM, cumulative9PM, totalShowCars, showAverageTemp);
+    // Publish show summary data to MQTT (retained latest summary)
+    publishMQTT(
+        MQTT_PUB_SUMMARY,
+        String("Date: ") + dateBuffer +
+            ", DaysRunning: " + daysRunning +
+            ", Before5: " + totalBefore5 +
+            ", 6PM: " + cumulative6PM +
+            ", 7PM: " + cumulative7PM +
+            ", 8PM: " + cumulative8PM +
+            ", 9PM: " + cumulative9PM +
+            ", ShowTotal: " + totalShowCars +
+            ", ShowAvgTemp: " + String(showAverageTemp, 1),
+        true
+    );
 }
 
 void getSavedValuesOnReboot() {
@@ -1313,33 +1400,47 @@ void getSavedValuesOnReboot() {
 
     // Check if the ESP32 is rebooting on a new day
     if (now.day() != lastDayOfMonth) {
-        dayOfMonth = now.day(); // Update to the current day
-        saveDayOfMonth(); // Save the new day to the SD card
-        totalDailyCars = 0; // Reset daily car count
-        saveDailyTotal(); // Save the reset value to the SD card
+        dayOfMonth = now.day();      // Update to the current day
+        saveDayOfMonth();            // Save the new day to the SD card
+        totalDailyCars = 0;          // Reset daily car count
+        saveDailyTotal();            // Save the reset value to the SD card
 
         // Increment days running, except on Christmas Eve
-        if (!(now.month() == 12 && now.day() == 24) ) {
+        if (!(now.month() == 12 && now.day() == 24)) {
             daysRunning++;
-            saveDaysRunning(); // Save updated days running to the SD card
+            saveDaysRunning();
             publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Day of Month Changed, Days Running Increased.");
         }
 
         // Log the update
         Serial.println("ESP32 reboot detected on a new day. Counts reset/updated.");
         publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reset/updated for new day.");
+
     } else {
         // If the day has not changed, reload the existing totals
-        getDailyTotal();   // Reload daily car count
-        getShowTotal();    // Reload show total
-        getDaysRunning();  // Reload days running
-        getHourlyData();   // Reload Hourly Count Data
+        getDailyTotal();
+        getShowTotal();
+        getDaysRunning();
+        getHourlyData();
 
         // Log the reload
         Serial.println("ESP32 reboot detected on the same day. Reloading saved counts.");
         publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reloaded for same day.");
     }
+
+    // -------------------------------------------------
+    // GAL 25-11-24: republish retained state on reboot
+    // so HA/Grafana never sit stale after ESP reboot.
+    // -------------------------------------------------
+    inParkCars = carCounterCars - totalDailyCars;
+
+    publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),    true);
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),   true);
+    publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars),true);
+    publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars), true);
+    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),    true);
 }
+
 /***** END OF DATA STORAGE & RETRIEVAL OPS *****/
 void debugInPark(const char* reason) {
     String msg = String(reason) +
@@ -1356,71 +1457,92 @@ void callback(char* topic, byte* payload, unsigned int length) {
   char message[length + 1];
   strncpy(message, (char*)payload, length);
   message[length] = '\0'; // Safely null-terminate the payload
-  
-  if (strcmp(topic, MQTT_SUB_TOPIC0) == 0)  {
-    /* Receive MQTT message with updated CarCounter totals*/
-    //carCounterCars = atoi((char *)payload);
+
+  // -------------------------------------------------
+  // Car Counter → EnterTotal (new tree)
+  // -------------------------------------------------
+  if (strcmp(topic, MQTT_SUB_CC_ENTER_TOTAL) == 0)  {
+    /* Receive MQTT message with updated CarCounter totals */
     carCounterCars = atoi(message);
-    inParkCars=carCounterCars-totalDailyCars; // recalculate cars in park
+
+    inParkCars = carCounterCars - totalDailyCars; // recalc cars in park
+
     if (carCounterCars != lastcarCounterCars) {
-      publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
-      publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars)); // update in park cars
+      // retained state updates
+      publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+      publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+
       debugInPark("EnterUpdate");
       lastcarCounterCars = carCounterCars;
-    }  
-  } else if (strcmp(topic, MQTT_SUB_TOPIC1) == 0) {
-    /* Topic used to manually reset gate total cars */
-    //totalDailyCars = atoi((char *)payload);
+    }
+
+  // -------------------------------------------------
+  // Config resets / setpoints (new tree)
+  // -------------------------------------------------
+  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DAILY) == 0) {
+    /* Manually reset daily gate total cars */
     totalDailyCars = atoi(message);
     saveDailyTotal();
     Serial.println(F(" Gate Counter Updated"));
-    publishMQTT(MQTT_PUB_HELLO, "Daily Total Updated");
-  } else if (strcmp(topic, MQTT_SUB_TOPIC2) == 0) {
-    /* Topic used to manually reset Total Show Cars */
-    //totalShowCars = atoi((char *)payload);
-    totalShowCars = atoi (message);
+
+    publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
+    publishMQTT(MQTT_PUB_HELLO, "Daily Total Updated"); // hello doesn't need retain
+
+  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_SHOW) == 0) {
+    /* Reset Total Show Cars */
+    totalShowCars = atoi(message);
     saveShowTotal();
     Serial.println(F(" Show Counter Updated"));
+
+    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
     publishMQTT(MQTT_PUB_HELLO, "Show Counter Updated");
-  } else if (strcmp(topic, MQTT_SUB_TOPIC3) == 0) {
-    /* Topic used to manually reset Calendar Day */
-    //DayOfMonth = atoi((char *)payload);
+
+  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DOM) == 0) {
+    /* Reset Calendar Day */
     dayOfMonth = atoi(message);
     saveDayOfMonth();
     Serial.println(F(" Calendar Day of Month Updated"));
+
+    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
     publishMQTT(MQTT_PUB_HELLO, "Calendar Day Updated");
-  } else if (strcmp(topic, MQTT_SUB_TOPIC4) == 0) {
-     /* Topic used to manually reset Days Running */
-    //daysRunning = atoi((char *)payload);
+
+  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DAYS) == 0) {
+    /* Reset Days Running */
     daysRunning = atoi(message);
     saveDaysRunning();
     Serial.println(F(" Days Running Updated"));
+
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
     publishMQTT(MQTT_PUB_HELLO, "Days Running Updated");
-  } else if (strcmp(topic, MQTT_SUB_TOPIC5) == 0) {
-    // Topic used to change car counter timeout  
-    //gateCounterTimeout = atoi((char *)payload);
+
+  } else if (strcmp(topic, MQTT_SUB_GATE_TIMEOUT) == 0) {
+    /* Change gate counter timeout */
     gateCounterTimeout = atoi(message);
     Serial.println(F(" Gate Counter Alarm Timer Updated"));
+
     publishMQTT(MQTT_PUB_HELLO, "Gate Counter Timeout Updated");
-  }  else if (strcmp(topic, MQTT_SUB_CARMS) == 0) {
-    // Topic used to change carDetectMS  
-    //gateCounterTimeout = atoi((char *)payload);
+
+  } else if (strcmp(topic, MQTT_SUB_CARMS) == 0) {
+    /* Change carDetectMS */
     carDetectMS = atoi(message);
-    Serial.println(F(" Gate Counter carDetectMS"));
+    Serial.println(F(" Gate Counter carDetectMS Updated"));
+
     publishMQTT(MQTT_PUB_HELLO, "Gate Counter carDetectMS Updated");
+
   } else if (strcmp(topic, MQTT_SUB_LOGGING) == 0) {
-        if (strcmp(message, "1") == 0) {
-            loggingEnabled = true;
-            Serial.println("Sensor logging ENABLED.");
-            publishMQTT(MQTT_DEBUG_LOG, "Sensor logging enabled.");
-        } else if (strcmp(message, "0") == 0) {
-            loggingEnabled = false;
-            Serial.println("Sensor logging DISABLED.");
-            publishMQTT(MQTT_DEBUG_LOG, "Sensor logging disabled.");
-        }
+    if (strcmp(message, "1") == 0) {
+      loggingEnabled = true;
+      Serial.println("Sensor logging ENABLED.");
+      publishMQTT(MQTT_DEBUG_LOG, "Sensor logging enabled.");
+    } else if (strcmp(message, "0") == 0) {
+      loggingEnabled = false;
+      Serial.println("Sensor logging DISABLED.");
+      publishMQTT(MQTT_DEBUG_LOG, "Sensor logging disabled.");
     }
+  }
 }
 /***** END OF CALLBACK TOPICS *****/
+
 
 /***** IDLE STUFF  *****/
 void logSensorStates() {
@@ -1450,7 +1572,6 @@ void logSensorStates() {
         }
     }
 }
-
 // Average Temperature each hour
 void averageHourlyTemp() {
     static int lastPublishedHour = -1;     // Tracks the last hour when data was published
@@ -1468,12 +1589,16 @@ void averageHourlyTemp() {
             hourlyTemp[lastPublishedHour] = tempReadingsSum / tempReadingsCount;
 
             // Publish to MQTT
-            char topic[50];
-            snprintf(topic, sizeof(topic), "%s/hourly/%02d", MQTT_PUB_TEMP, lastPublishedHour);
-            publishMQTT(topic, String(hourlyTemp[lastPublishedHour], 1)); // Publish with 1 decimal place
+            char hourlyTopic[120];  // GAL 25-11-24: expanded for new /Env/tempHumidity path
+            snprintf(hourlyTopic, sizeof(hourlyTopic),
+                     "%s/hourly/%02d", MQTT_PUB_TEMP, lastPublishedHour);
+
+            publishMQTT(hourlyTopic, String(hourlyTemp[lastPublishedHour], 1), true); 
+            // retained hourly snapshot
 
             // Log the published temperature
-            Serial.printf("Hour %02d average temperature published: %.1f°F\n", lastPublishedHour, hourlyTemp[lastPublishedHour]);
+            Serial.printf("Hour %02d average temperature published: %.1f°F\n",
+                          lastPublishedHour, hourlyTemp[lastPublishedHour]);
             //publishDebugLog("Hourly average temperature published: " + String(hourlyTemp[lastPublishedHour], 1));
         }
 
@@ -1491,73 +1616,73 @@ void averageHourlyTemp() {
     }
 }
 
+
 // Car Counted, increment the counter by 1 and append to the Exitlog.csv log file on the SD card
 void countTheCar() {
     DateTime now = rtc.now();
     Serial.print(now.toString(buf2));
     Serial.print(", Time to pass = ");
     Serial.println(timeToPassMS);
-    //Serial.print(", ");
-    //Serial.print(String("DateTime::TIMESTAMP_FULL:\t")+now.timestamp(DateTime::TIMESTAMP_FULL));
-    //Serial.print(",1,"); 
-    totalDailyCars ++;
+
+    totalDailyCars++;
+
     // Increment hourly car count
     int currentHour = now.hour();
     hourlyCount[currentHour]++;
-    saveDailyTotal(); // Update Daily Total on SD Card to retain numbers with reboot
+
+    saveDailyTotal();   // retain numbers with reboot
     saveHourlyCounts();
-    // Construct the MQTT topic dynamically
-    char topic[60];
-    snprintf(topic, sizeof(topic), "%s/hour%02d", MQTT_PUB_CARS_HOURLY, currentHour);
-    // Publish current hour's data to MQTT
-    publishMQTT(topic, String(hourlyCount[currentHour]));
 
+    // Publish current hour's data to MQTT (NEW tree)
+    // Final form: msb/traffic/GateCounter/Cars/Hourly/07
+    char hourlyTopic[120];  // GAL 25-11-24: expanded for new bucketed paths
+    snprintf(hourlyTopic, sizeof(hourlyTopic),
+             "%s/%02d", MQTT_PUB_CARS_HOURLY, currentHour);
 
-  // increase Show Count only when show is open
-  if (showTime == true) {
-    totalShowCars ++;  // increase Show Count only when show is open
-    saveShowTotal(); // update show total count in event of power failure during show hours
-  }
-  inParkCars=carCounterCars-totalDailyCars;
-  // open file for writing Car Data
-  myFile = SD.open(fileName6, FILE_APPEND);
-  if (myFile) {
-    myFile.print(now.toString(buf2));
-    myFile.print(", ");
-    myFile.print (timeToPassMS) ; 
-    myFile.print(", ");
-    myFile.print (totalDailyCars) ; 
-    myFile.print(", ");
-    myFile.print(inParkCars);
-    myFile.print(", ");
-    myFile.print(tempF);
-    myFile.print(" , ");
-    myFile.println(beamATripTime_ms); //Prints millis when car is detected
-    myFile.close();
-    /*
-    Serial.print(F("Car Saved to SD Card. Car Number = "));
-    Serial.print(totalDailyCars);
-    Serial.print(F(" Cars in Park = "));
-    Serial.println(inParkCars);  
-    */
+    publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
-    publishMQTT(MQTT_PUB_TIME, now.toString(buf2));
-    publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars));
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars));
-    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
-    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
+    // increase Show Count only when show is open
+    if (showTime == true) {
+        totalShowCars++;
+        saveShowTotal();
+    }
 
-    publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
-    //snprintf (msg, MSG_BUFFER_SIZE, "Car #%ld,", totalDailyCars);
-    //Serial.print("Publish message: ");
-    //Serial.println(msg);
-    //mqtt_client.publish("msbGateCount", msg);
-    //}
-  } else {
-    Serial.print(F("SD Card: Cannot open the file: "));
-    Serial.println(fileName6);
-  }
-} 
+    inParkCars = carCounterCars - totalDailyCars;
+
+    // open file for writing Car Data
+    myFile = SD.open(fileName6, FILE_APPEND);
+    if (myFile) {
+        myFile.print(now.toString(buf2));
+        myFile.print(", ");
+        myFile.print(timeToPassMS);
+        myFile.print(", ");
+        myFile.print(totalDailyCars);
+        myFile.print(", ");
+        myFile.print(inParkCars);
+        myFile.print(", ");
+        myFile.print(tempF);
+        myFile.print(" , ");
+        myFile.println(beamATripTime_ms);
+        myFile.close();
+
+        // ---- Event-driven state publishes (NEW tree) ----
+        publishMQTT(MQTT_PUB_TIME, now.toString(buf2));  // time doesn't need retain
+
+        publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+        publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+        publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);
+
+        publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
+        publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
+
+        publishMQTT(MQTT_PUB_TTP, String(timeToPassMS), true);
+
+    } else {
+        Serial.print(F("SD Card: Cannot open the file: "));
+        Serial.println(fileName6);
+    }
+}
+
 
 
 // =========================================================
