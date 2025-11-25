@@ -9,9 +9,19 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.24.0"   // Firmware Version
+#define FWVersion "25.11.24.1"   // Firmware Version
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.24.1  Synced GateCounter MQTT sensor definitions with updated HA
+                sensor files. Removed all year-based `_2025` unique_id
+                suffixes and standardized entity IDs for long-term stability.
+             Rebuilt mqtt_configs/sensors/gatecounter.yaml to match the
+                2025 topic tree (`/System`, `/Env`, `/Cars`, `/Calendar`,
+                `/Sensors`), ensuring consistent alignment with firmware.
+             Cleaned up legacy/duplicate HA entities (_2, _2025, _3 ghosts)
+                and restored stable entity naming for dashboards.
+             No firmware logic changes, no heartbeat modifications included
+                in this commit.
 25.11.24.0  Aligned Gate Counter with Car Counter 2025 MQTT/state model.
              • Converted all state MQTT publishes to retained (ExitTotal, InParkCars,
                ShowTotal, DayOfMonth, DaysRunning, HourlyCounts).
@@ -158,8 +168,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 24.10.15.0 Fixed Pin problem. Beam & mag sensor swapped causing the problems. Purpose: suppliments Car Counter to improve traffic control and determine park capacity
 23.12.13.0 Changed time format YYYY-MM-DD hh:mm:ss 12/13/23
 */
-## END CHANGELOG ## 
-
+// ------ END CHANGELOG  ------
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -204,6 +213,13 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 //GATE COUNTER GLOBAL CONSTANTS FOR SHOW TIMES and SAFETY
+// ===== Show start date integration (from Car Counter) =====
+String showStartDate = "";        // "YYYY-MM-DD"
+bool showStartDateValid = false;  // true once parsed
+// Show start date (set by CarCounter via MQTT)
+static int showStartYear = 0;
+static int showStartMonth = 0;
+static int showStartDay = 0;
 const int showStartMin = 17 * 60 + 10; // 5:10 PM in minutes
 const int showEndMin = 21 * 60 + 20;   // 9:20 PM in minutes (including additional checks till 9:20 PM)
 bool rtcReady = false;  // GAL 25-11-22: RTC boot-safety guard
@@ -231,6 +247,9 @@ char topicBase[60];
 #define MQTT_PUB_HEARTBEAT   "msb/traffic/GateCounter/System/heartbeat"
 #define MQTT_DEBUG_LOG       "msb/traffic/GateCounter/System/debug"
 #define MQTT_COUNTER_LOG     "msb/traffic/GateCounter/System/CounterLog"
+#define MQTT_PUB_SEASON_FOLDER "msb/traffic/GateCounter/System/seasonFolder"
+#define MQTT_PUB_SEASON_YEAR   "msb/traffic/GateCounter/System/seasonYear"
+
 
 // WiFi diagnostics (retained)
 #define MQTT_PUB_WIFI_SSID   "msb/traffic/GateCounter/System/wifi_ssid"
@@ -274,6 +293,8 @@ char topicBase[60];
 // ---------------- CAR COUNTER INPUTS (new tree) ----------------
 #define MQTT_SUB_CC_ENTER_TOTAL     "msb/traffic/CarCounter/Cars/EnterTotal"
 #define MQTT_SUB_CC_SHOW_TOTAL      "msb/traffic/CarCounter/Cars/ShowTotal"
+// Car Counter show calendar (authoritative)
+#define MQTT_SUB_CC_SHOW_START_DATE "msb/traffic/CarCounter/Config/showStartDate"
 
 /***** 2025 CarCounter-parity debounced state machine for GateCounter *****/
 
@@ -441,19 +462,30 @@ bool flagHourlyReset = false;
 bool showTime = false;
 bool resetFlagsOnce = false;
 
-// **********FILE NAMES FOR SD CARD *********
-File myFile; //used to write files to SD Card
-const String fileName1 = "/ExitTotal.txt"; // /DailyTot.txt file to store daily counts in the event of a Failure
-const String fileName2 = "/ShowTotal.txt";  // /ShowTot.txt file to store season total counts
-const String fileName3 = "/DayOfMonth.txt"; // /DayOfMonth.txt file to store current day number
-const String fileName4 = "/RunDays.txt"; // /RunDays.txt file to store days since open
-const String fileName5 = "/GateHourlyData.csv"; // /GateSummary.csv Stores Daily Totals by Hour and total
-const String fileName6 = "/GateLog.csv"; // GateLog.csv file to store all car counts for season (was MASTER.CSV)
-const String fileName7 = "/GateDailySummary.csv"; // Show summary of counts during show (5:00pm to 9:10pm)
-const String fileName8 = "/data/index.html"; // data folder and index.html for serving files OTA
-const String fileName9 = "/data/style.css"; // data folder and index.html for serving files OTA
-const String fileName10 = "/SensorLog.csv"; // sensorLog.csv for recording gate sensors for plotting
-//const String fileName7 = "/SensorBounces.csv"; // /SensorBounces.csv file to store all bounce counts for season
+// ********** SEASONAL FILE NAMES FOR SD CARD *********
+
+File myFile;   // global handle for SD file ops
+
+// Computed on boot after RTC + SD init
+String seasonFolder = "";   // Example: "/GC/2025"
+
+// Build full seasonal file path
+String sPath(const char *fname) {
+    return seasonFolder + "/" + String(fname);
+}
+
+// Runtime-assigned filenames (filled in by initSeasonalPaths())
+String fileName1;   // ExitTotal.txt       (daily total)
+String fileName2;   // ShowTotal.txt       (season total)
+String fileName3;   // DayOfMonth.txt
+String fileName4;   // RunDays.txt
+String fileName5;   // GateHourlyData.csv
+String fileName6;   // GateLog.csv
+String fileName7;   // GateDailySummary.csv
+String fileName8;   // data/index.html     (OTA / UI)
+String fileName9;   // data/style.css
+String fileName10;  // SensorLog.csv
+String fileNameShowStart; // ShowStart.txt   (opening date)
 
 /***** Arrays for Hourly Totals/Averages *****/
 static unsigned int hourlyCount[24] = {0}; // Array for Daily total cars per hour
@@ -543,6 +575,75 @@ void setup_wifi()  {
  
     delay(1000);
 }  // END WiFi Setup
+
+// =====================================================
+// GAL 25-11-24: Seasonal SD folder structure (/GC/YYYY/)
+// Matches Car Counter season logic.
+// SeasonYear: Nov-Dec => current year, Jan-Oct => previous year.
+// =====================================================
+int determineSeasonYear(const DateTime &now) {
+    int y = now.year();
+    int m = now.month();
+    if (m >= 11) return y;     // Nov/Dec = current year season
+    return y - 1;             // Jan–Oct belongs to previous season
+}
+
+void ensureSeasonFolderExists(int seasonYear) {
+    String base = "/GC";
+    String seasonPath = base + "/" + String(seasonYear);
+
+    if (!SD.exists(base)) {
+        SD.mkdir(base);
+    }
+    if (!SD.exists(seasonPath)) {
+        SD.mkdir(seasonPath);
+        Serial.printf("Created season folder: %s\n", seasonPath.c_str());
+    }
+}
+
+// Forward Declarations 
+void callback(char* topic, byte* payload, unsigned int length);
+int computeDaysRunningFromStart();
+
+// MQTT forward declarations for seasonal folder init
+void publishMQTT(const char *topic, const String &message, bool retainFlag);
+void publishMQTT(const char *topic, const String &message);
+void publishDebugEvent(const char* event, const String& details, bool retainFlag);
+
+
+void initSeasonalPaths() {
+    DateTime now = rtc.now();
+    int seasonYear = determineSeasonYear(now);
+
+    ensureSeasonFolderExists(seasonYear);
+
+    seasonFolder = "/GC/" + String(seasonYear);
+
+    // Assign full seasonal paths
+    fileName1 = sPath("DAILYTOT.txt");
+    fileName2 = sPath("SHOWTOT.txt");
+    fileName3 = sPath("DAYOFMONTH.txt");
+    fileName4 = sPath("DAYSRUNNING.txt");
+    fileName5 = sPath("GateHourlyData.csv");
+    fileName6 = sPath("ExitLog.csv");
+    fileName7 = sPath("ShowSummary.csv");
+    fileNameShowStart = sPath("ShowStart.txt");
+
+    Serial.printf("Season folder set to: %s\n", seasonFolder.c_str());
+        // ---- MQTT visibility for headless debugging ----
+    publishMQTT(MQTT_PUB_SEASON_YEAR,   String(seasonYear), true);
+    publishMQTT(MQTT_PUB_SEASON_FOLDER, seasonFolder,      true);
+
+    publishDebugEvent(
+        "season_init",
+        "seasonYear=" + String(seasonYear) +
+        " folder=" + seasonFolder,
+        true
+    );
+
+}
+
+
 
 // BEGIN OTA SD Card File Operations
 void listSDFiles(AsyncWebServerRequest *request) {
@@ -765,6 +866,36 @@ String encodeQueuedMessage(const char *topic, const String &msg, bool retainFlag
     return String(topic) + "|" + msg + "|" + (retainFlag ? "1" : "0");
 }
 
+void saveShowStartDate() {
+    File f = SD.open(fileNameShowStart, FILE_WRITE);
+    if (f) {
+        f.printf("%04d-%02d-%02d\n", showStartYear, showStartMonth, showStartDay);
+        f.close();
+    }
+}
+
+void getShowStartDate() {
+    File f = SD.open(fileNameShowStart, FILE_READ);
+    if (!f) {
+        Serial.println("No saved show start date.");
+        return;
+    }
+
+    char buf[20];
+    int y, m, d;
+
+    if (f.readBytesUntil('\n', buf, sizeof(buf)) > 0) {
+        if (sscanf(buf, "%d-%d-%d", &y, &m, &d) == 3) {
+            showStartYear = y;
+            showStartMonth = m;
+            showStartDay = d;
+            showStartDateValid = true;
+        }
+    }
+    f.close();
+}
+
+
 // Retain-aware publish (NEW overload)
 void publishMQTT(const char *topic, const String &message, bool retainFlag) {
     if (mqtt_client.connected()) {
@@ -879,8 +1010,8 @@ void KeepMqttAlive() {
     start_MqttMillis = millis();
 }
 
-// Forward Declare the callback function
-void callback(char* topic, byte* payload, unsigned int length);
+
+
 
 //GATE COUNTER Connection to MQTT Server
 void MQTTreconnect() {
@@ -922,6 +1053,9 @@ void MQTTreconnect() {
                 // Once connected, publish an announcement (retained)
                 publishMQTT(MQTT_PUB_HELLO, String("Gate Counter ONLINE @ ") + bootTimestamp, true);
                 publishMQTT(MQTT_PUB_FIRMWARE, FWVersion, true);
+                publishMQTT(MQTT_PUB_SEASON_YEAR,   String(determineSeasonYear(rtc.now())), true);
+                publishMQTT(MQTT_PUB_SEASON_FOLDER, seasonFolder, true);
+
 
                 // publish temp/RH JSON on connect (retained)
                 char jsonPayload[100];
@@ -958,6 +1092,7 @@ void MQTTreconnect() {
                 mqtt_client.subscribe(MQTT_SUB_GATE_TIMEOUT);
                 mqtt_client.subscribe(MQTT_SUB_CARMS);
                 mqtt_client.subscribe(MQTT_SUB_LOGGING);
+                mqtt_client.subscribe(MQTT_SUB_CC_SHOW_START_DATE);
 
 
                 // Log subscriptions
@@ -981,6 +1116,28 @@ void MQTTreconnect() {
     }
 }
 /***** END MQTT SECTION *****/
+// =====================================================
+// Compute DaysRunning from showStartDate
+// Day 1 = opening night; legacy Xmas Eve gap preserved
+// =====================================================
+int computeDaysRunningFromStart() {
+    if (!showStartDateValid) return daysRunning; // fallback
+
+    DateTime now = rtc.now();
+    DateTime start(showStartYear, showStartMonth, showStartDay, 0, 0, 0);
+
+    TimeSpan diff = now - start;
+    int computed = diff.days() + 1;   // opening night is Day 1
+
+    // Legacy Christmas Eve gap:
+    // if date is 12/24 or later, subtract 1 day
+    if (now.month() == 12 && now.day() >= 24) {
+        computed -= 1;
+    }
+
+    if (computed < 1) computed = 1;
+    return computed;
+}
 
 void checkWiFiConnection() {
 
@@ -1397,19 +1554,33 @@ void getSavedValuesOnReboot() {
 
     // Read the last recorded day from the SD card
     getDayOfMonth();
+    getShowStartDate();
 
     // Check if the ESP32 is rebooting on a new day
     if (now.day() != lastDayOfMonth) {
-        dayOfMonth = now.day();      // Update to the current day
-        saveDayOfMonth();            // Save the new day to the SD card
-        totalDailyCars = 0;          // Reset daily car count
-        saveDailyTotal();            // Save the reset value to the SD card
+        dayOfMonth = now.day();   // Update to the current day
+        saveDayOfMonth();         // Save the new day to the SD card
 
-        // Increment days running, except on Christmas Eve
+        totalDailyCars = 0;       // Reset daily car count
+        saveDailyTotal();         // Persist reset
+
+        // Show total should NOT reset on a new day
+        getShowTotal();
+
+        // Recompute daysRunning, except on Christmas Eve (legacy gap rule)
         if (!(now.month() == 12 && now.day() == 24)) {
-            daysRunning++;
+            daysRunning = computeDaysRunningFromStart();
             saveDaysRunning();
-            publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Day of Month Changed, Days Running Increased.");
+
+            publishMQTT(
+                MQTT_DEBUG_LOG,
+                "Rebooted on new day. DaysRunning recomputed from showStartDate."
+            );
+        } else {
+            publishMQTT(
+                MQTT_DEBUG_LOG,
+                "Rebooted on Christmas Eve. DaysRunning left unchanged (legacy gap)."
+            );
         }
 
         // Log the update
@@ -1417,13 +1588,12 @@ void getSavedValuesOnReboot() {
         publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reset/updated for new day.");
 
     } else {
-        // If the day has not changed, reload the existing totals
+        // Same day reboot: reload everything
         getDailyTotal();
         getShowTotal();
         getDaysRunning();
         getHourlyData();
 
-        // Log the reload
         Serial.println("ESP32 reboot detected on the same day. Reloading saved counts.");
         publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reloaded for same day.");
     }
@@ -1434,12 +1604,15 @@ void getSavedValuesOnReboot() {
     // -------------------------------------------------
     inParkCars = carCounterCars - totalDailyCars;
 
-    publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),    true);
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),   true);
-    publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars),true);
-    publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars), true);
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),    true);
+    publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),     true);
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),    true);
+    publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+    publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);
+    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
 }
+
+
+
 
 /***** END OF DATA STORAGE & RETRIEVAL OPS *****/
 void debugInPark(const char* reason) {
@@ -1452,6 +1625,19 @@ void debugInPark(const char* reason) {
 
 
 /*** MQTT CALLBACK TOPICS ****/
+static inline bool topicIs(const char* t, const char* target) {
+  return strcmp(t, target) == 0;
+}
+
+static inline void publishHello(const char* msg) {
+  publishMQTT(MQTT_PUB_HELLO, msg); // hello is an event, not retained
+}
+
+static inline void publishStateExitInPark() {
+  publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
+  publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+}
+
 void callback(char* topic, byte* payload, unsigned int length) {
 
   char message[length + 1];
@@ -1459,77 +1645,92 @@ void callback(char* topic, byte* payload, unsigned int length) {
   message[length] = '\0'; // Safely null-terminate the payload
 
   // -------------------------------------------------
+  // Car Counter → ShowStartDate
+  // Topic: msb/traffic/CarCounter/Config/showStartDate
+  // Payload: YYYY-MM-DD
+  // -------------------------------------------------
+  if (topicIs(topic, "msb/traffic/CarCounter/Config/showStartDate")) {
+      showStartDate = message;
+      showStartDateValid = (showStartDate.length() == 10); // "YYYY-MM-DD"
+      Serial.printf("ShowStartDate received: %s\n", showStartDate.c_str());
+      return;
+  }
+
+  // -------------------------------------------------
   // Car Counter → EnterTotal (new tree)
   // -------------------------------------------------
-  if (strcmp(topic, MQTT_SUB_CC_ENTER_TOTAL) == 0)  {
-    /* Receive MQTT message with updated CarCounter totals */
+  if (topicIs(topic, MQTT_SUB_CC_ENTER_TOTAL))  {
     carCounterCars = atoi(message);
-
     inParkCars = carCounterCars - totalDailyCars; // recalc cars in park
 
     if (carCounterCars != lastcarCounterCars) {
-      // retained state updates
-      publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-      publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
-
+      publishStateExitInPark();
       debugInPark("EnterUpdate");
       lastcarCounterCars = carCounterCars;
     }
+    return;
+  }
 
   // -------------------------------------------------
   // Config resets / setpoints (new tree)
   // -------------------------------------------------
-  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DAILY) == 0) {
-    /* Manually reset daily gate total cars */
+  if (topicIs(topic, MQTT_SUB_GATE_RESET_DAILY)) {
     totalDailyCars = atoi(message);
     saveDailyTotal();
     Serial.println(F(" Gate Counter Updated"));
 
-    publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
-    publishMQTT(MQTT_PUB_HELLO, "Daily Total Updated"); // hello doesn't need retain
+    publishStateExitInPark();
+    publishHello("Daily Total Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_SHOW) == 0) {
-    /* Reset Total Show Cars */
+  if (topicIs(topic, MQTT_SUB_GATE_RESET_SHOW)) {
     totalShowCars = atoi(message);
     saveShowTotal();
     Serial.println(F(" Show Counter Updated"));
 
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
-    publishMQTT(MQTT_PUB_HELLO, "Show Counter Updated");
+    publishHello("Show Counter Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DOM) == 0) {
-    /* Reset Calendar Day */
+  if (topicIs(topic, MQTT_SUB_GATE_RESET_DOM)) {
     dayOfMonth = atoi(message);
     saveDayOfMonth();
     Serial.println(F(" Calendar Day of Month Updated"));
 
     publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
-    publishMQTT(MQTT_PUB_HELLO, "Calendar Day Updated");
+    publishHello("Calendar Day Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_GATE_RESET_DAYS) == 0) {
-    /* Reset Days Running */
+  if (topicIs(topic, MQTT_SUB_GATE_RESET_DAYS)) {
     daysRunning = atoi(message);
     saveDaysRunning();
     Serial.println(F(" Days Running Updated"));
 
     publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-    publishMQTT(MQTT_PUB_HELLO, "Days Running Updated");
+    publishHello("Days Running Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_GATE_TIMEOUT) == 0) {
-    /* Change gate counter timeout */
+  if (topicIs(topic, MQTT_SUB_GATE_TIMEOUT)) {
     gateCounterTimeout = atoi(message);
     Serial.println(F(" Gate Counter Alarm Timer Updated"));
 
-    publishMQTT(MQTT_PUB_HELLO, "Gate Counter Timeout Updated");
+    publishHello("Gate Counter Timeout Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_CARMS) == 0) {
-    /* Change carDetectMS */
+  if (topicIs(topic, MQTT_SUB_CARMS)) {
     carDetectMS = atoi(message);
     Serial.println(F(" Gate Counter carDetectMS Updated"));
 
-    publishMQTT(MQTT_PUB_HELLO, "Gate Counter carDetectMS Updated");
+    publishHello("Gate Counter carDetectMS Updated");
+    return;
+  }
 
-  } else if (strcmp(topic, MQTT_SUB_LOGGING) == 0) {
+  if (topicIs(topic, MQTT_SUB_LOGGING)) {
     if (strcmp(message, "1") == 0) {
       loggingEnabled = true;
       Serial.println("Sensor logging ENABLED.");
@@ -1539,6 +1740,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       Serial.println("Sensor logging DISABLED.");
       publishMQTT(MQTT_DEBUG_LOG, "Sensor logging disabled.");
     }
+    return;
   }
 }
 /***** END OF CALLBACK TOPICS *****/
@@ -2032,7 +2234,7 @@ void timeTriggeredEvents() {
     // Increment days running only if not Christmas Eve
     if (now.day() != lastDayOfMonth) {
         if (!(now.month() == 12 && now.day() == 24) && !flagDaysRunningReset) {
-            daysRunning++;
+            daysRunning = computeDaysRunningFromStart();
             saveDaysRunning();
             publishMQTT(MQTT_DEBUG_LOG, "Days running: " + String(daysRunning));
         }
@@ -2268,6 +2470,18 @@ void setup() {
     //Initialize SD Card
     SD.begin(PIN_SPI_CS);
     initSDCard();  // Initialize SD card and ready for Read/Write
+
+    initSeasonalPaths();   // sets up annual data file structure
+        publishDebugEvent(
+        "season_files",
+        "ExitTotal=" + fileName1 +
+        " Hourly=" + fileName5 +
+        " GateLog=" + fileName6,
+        true
+    );
+
+
+
 
     // Check and create Required Data files
     checkAndCreateFile(fileName1);
