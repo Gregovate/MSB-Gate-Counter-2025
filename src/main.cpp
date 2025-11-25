@@ -9,9 +9,13 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.24.1"   // Firmware Version
+#define FWVersion "25.11.24.2"   // Firmware Version
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.24.2  Added separate keep-alive timer in KeepMqttAlive() to publish
+             select MQTT state values every 30 seconds if no cars are counted,
+             ensuring remote dashboards stay updated during low traffic periods.
+             Independent of publishMQTT() resets.
 25.11.24.1  Synced GateCounter MQTT sensor definitions with updated HA
                 sensor files. Removed all year-based `_2025` unique_id
                 suffixes and standardized entity IDs for long-term stability.
@@ -229,6 +233,8 @@ String bootTimestamp = "";  // GAL 25-11-22: Store boot timestamp for logging
 /***** MQTT TOPIC DEFINITIONS *****/
 #define THIS_MQTT_CLIENT "espGateCounter" // Look at line 90 and set variable for WiFi Client secure & PubSubClient 12/23/23
 int mqttKeepAlive = 30; // publish select values every x seconds to keep MQTT client connected
+// Keepalive timer independent of publishMQTT() resets
+unsigned long lastKeepAliveMillis = 0;
 
 // Base path
 char topic[60];
@@ -977,10 +983,12 @@ void publishDebugEvent(const char* event, const String& details, bool retainFlag
     publishMQTT(MQTT_DEBUG_LOG, String(buf), retainFlag);
 }
 
-// Used to publish current counts to update GATE Counter every 30 seconds if no car is counted
+// Used to publish current counts & heartbeat every 30s during quiet periods
 void KeepMqttAlive() {
 
     // ---- Heartbeat (retained, ONLY here) ----
+    publishMQTT(MQTT_PUB_FIRMWARE, String(FWVersion), true);
+
     publishMQTT(
         MQTT_PUB_HEARTBEAT,
         String("{\"boot\":\"") + bootTimestamp +
@@ -992,7 +1000,7 @@ void KeepMqttAlive() {
         true
     );
 
-    // ---- Temp/RH as JSON (retained to match HA templates) ----
+    // ---- Temp/RH JSON (retained) ----
     char jsonPayload[100];
     snprintf(jsonPayload, sizeof(jsonPayload),
              "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
@@ -1001,14 +1009,16 @@ void KeepMqttAlive() {
     // ---- Retained core counts ----
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+    publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);  // if you want it retained too
 
-    // ---- WiFi diagnostics (retained) ----
+    // ---- WiFi diagnostics (retained, NEW TREE topics) ----
     publishMQTT(MQTT_PUB_WIFI_RSSI, String(WiFi.RSSI()), true);
     publishMQTT(MQTT_PUB_WIFI_SSID, WiFi.SSID(),        true);
     publishMQTT(MQTT_PUB_WIFI_IP,   WiFi.localIP().toString(), true);
 
-    start_MqttMillis = millis();
+    // DO NOT touch start_MqttMillis here anymore
 }
+
 
 
 
@@ -2532,9 +2542,10 @@ void loop() {
 
     detectCar();              // Detect cars
 
-    //Added to kepp mqtt connection alive and periodically publish select values
-    if ((millis() - start_MqttMillis) > (mqttKeepAlive * 1000)) {
+    // Keep MQTT client alive and publish heartbeat on its own clock
+    if (millis() - lastKeepAliveMillis >= (unsigned long)mqttKeepAlive * 1000UL) {
         KeepMqttAlive();
+        lastKeepAliveMillis = millis();
     }
 } 
 /***** Repeat Loop *****/
