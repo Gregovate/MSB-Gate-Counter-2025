@@ -15,7 +15,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 25.11.24.2  Added separate keep-alive timer in KeepMqttAlive() to publish
              select MQTT state values every 30 seconds if no cars are counted,
              ensuring remote dashboards stay updated during low traffic periods.
-             Independent of publishMQTT() resets.
+             Independent of publishMQTT() resets. Added Retained flag to beam states
 25.11.24.1  Synced GateCounter MQTT sensor definitions with updated HA
                 sensor files. Removed all year-based `_2025` unique_id
                 suffixes and standardized entity IDs for long-term stability.
@@ -1947,11 +1947,11 @@ void detectCar() {
     // Publish stable state changes (same topics as now)
     if (beamBState != lastBeamBState) {
         lastBeamBState = beamBState;
-        publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
+        publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
     }
     if (beamAState != lastBeamAState) {
         lastBeamAState = beamAState;
-        publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
+        publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
     }
 
     bool aBroken = (beamAState == 1);
@@ -2450,9 +2450,9 @@ void setup() {
     beamAState  = (rawA == HIGH) ? 1 : 0;
     beamBState = (rawB == HIGH) ? 1 : 0;
 
-    // Force MQTT to correct states on every reboot
-    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState));
-    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState));
+    // Force MQTT to correct states on every reboot (RETAINED!)
+    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
+    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
 
     // Sync last-states so loop doesn't immediately republish
     lastBeamAState  = beamAState;
