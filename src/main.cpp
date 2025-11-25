@@ -16,6 +16,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
              select MQTT state values every 30 seconds if no cars are counted,
              ensuring remote dashboards stay updated during low traffic periods.
              Independent of publishMQTT() resets. Added Retained flag to beam states
+             and betweenCars publishes.
 25.11.24.1  Synced GateCounter MQTT sensor definitions with updated HA
                 sensor files. Removed all year-based `_2025` unique_id
                 suffixes and standardized entity IDs for long-term stability.
@@ -2038,7 +2039,7 @@ void detectCar() {
                 // Between cars
                 if (lastCarDetected_ms > 0) {
                     unsigned long betweenCars = currentMillis - lastCarDetected_ms;
-                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(betweenCars));
+                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(betweenCars), true);
                 }
                 lastCarDetected_ms = currentMillis;
 
