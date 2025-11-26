@@ -9,10 +9,18 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.26.0"   // Firmware Version
+#define FWVersion "25.11.26.1"   // Firmware Version
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.26.1  GAL Standardized System/hello payload to JSON object:
+               { "device":..., "status":..., "fw":..., "boot":..., "msg":... }
+             Added publishHello(status,msg,retain) helper for retained
+               connection/update events.
+             Added publishHelloEvent() for non-retained config/reset events.
+             Removed legacy string HELLO publishes.
+             Updated MQTTreconnect() to publish retained JSON ONLINE status.
+             Aligned Home Assistant integration with new JSON format.
 25.11.26.0  Updated MQTT topic tree + dual-beam telemetry refinements
             - Adopted 2025 clean topic structure:
                 /System /Env /Cars /Calendar /Sensors /Config
@@ -1034,6 +1042,33 @@ void KeepMqttAlive() {
     // DO NOT touch start_MqttMillis here anymore
 }
 
+/*** HELLO / STATUS JSON HELPER ****/
+// GAL 25-11-26: Standardize HELLO as JSON status/event channel
+static inline void publishHello(const char* status, const char* msg, bool retainFlag) {
+  char buf[256];
+
+  snprintf(buf, sizeof(buf),
+      "{"
+        "\"device\":\"%s\","
+        "\"status\":\"%s\","
+        "\"fw\":\"%s\","
+        "\"boot\":\"%s\","
+        "\"msg\":\"%s\""
+      "}",
+      THIS_MQTT_CLIENT,
+      status,
+      FWVersion,
+      bootTimestamp.c_str(),
+      msg
+  );
+
+  publishMQTT(MQTT_PUB_HELLO, String(buf), retainFlag);
+}
+
+// Convenience wrapper for non-retained config/info events
+static inline void publishHelloEvent(const char* msg) {
+  publishHello("event", msg, false);
+}
 
 
 
@@ -1076,7 +1111,7 @@ void MQTTreconnect() {
                 Serial.println("Waiting for Car");
 
                 // Once connected, publish an announcement (retained)
-                publishMQTT(MQTT_PUB_HELLO, String("Gate Counter ONLINE @ ") + bootTimestamp, true);
+                publishHello("online", "Gate Counter ONLINE", true);
                 publishMQTT(MQTT_PUB_FIRMWARE, FWVersion, true);
                 publishMQTT(MQTT_PUB_SEASON_YEAR,   String(determineSeasonYear(rtc.now())), true);
                 publishMQTT(MQTT_PUB_SEASON_FOLDER, seasonFolder, true);
@@ -1654,9 +1689,33 @@ static inline bool topicIs(const char* t, const char* target) {
   return strcmp(t, target) == 0;
 }
 
-static inline void publishHello(const char* msg) {
-  publishMQTT(MQTT_PUB_HELLO, msg); // hello is an event, not retained
-}
+// // GAL 25-11-26: Standardize HELLO as JSON status/event channel
+// static inline void publishHello(const char* status, const char* msg, bool retainFlag) {
+//   char buf[256];
+
+//   snprintf(buf, sizeof(buf),
+//       "{"
+//         "\"device\":\"%s\","
+//         "\"status\":\"%s\","
+//         "\"fw\":\"%s\","
+//         "\"boot\":\"%s\","
+//         "\"msg\":\"%s\""
+//       "}",
+//       THIS_MQTT_CLIENT,
+//       status,
+//       FWVersion,
+//       bootTimestamp.c_str(),
+//       msg
+//   );
+
+//   publishMQTT(MQTT_PUB_HELLO, String(buf), retainFlag);
+// }
+
+// // Convenience wrapper for non-retained config/info events
+// static inline void publishHelloEvent(const char* msg) {
+//   publishHello("event", msg, false);
+// }
+
 
 static inline void publishStateExitInPark() {
   publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
@@ -1705,7 +1764,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Gate Counter Updated"));
 
     publishStateExitInPark();
-    publishHello("Daily Total Updated");
+    publishHelloEvent("Daily Total Updated");
     return;
   }
 
@@ -1715,7 +1774,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Show Counter Updated"));
 
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
-    publishHello("Show Counter Updated");
+    publishHelloEvent("Show Counter Updated");
     return;
   }
 
@@ -1725,7 +1784,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Calendar Day of Month Updated"));
 
     publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
-    publishHello("Calendar Day Updated");
+    publishHelloEvent("Calendar Day Updated");
     return;
   }
 
@@ -1735,7 +1794,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Days Running Updated"));
 
     publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-    publishHello("Days Running Updated");
+    publishHelloEvent("Days Running Reset");
     return;
   }
 
@@ -1743,7 +1802,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     gateCounterTimeout = atoi(message);
     Serial.println(F(" Gate Counter Alarm Timer Updated"));
 
-    publishHello("Gate Counter Timeout Updated");
+    publishHelloEvent("Gate Counter Timeout Updated");
     return;
   }
 
@@ -1751,7 +1810,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     carDetectMS = atoi(message);
     Serial.println(F(" Gate Counter carDetectMS Updated"));
 
-    publishHello("Gate Counter carDetectMS Updated");
+    publishHelloEvent("Gate Counter carDetectMS Updated");
     return;
   }
 
@@ -1759,11 +1818,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if (strcmp(message, "1") == 0) {
       loggingEnabled = true;
       Serial.println("Sensor logging ENABLED.");
-      publishMQTT(MQTT_DEBUG_LOG, "Sensor logging enabled.");
+      publishHelloEvent("Logging Enabled");
     } else if (strcmp(message, "0") == 0) {
       loggingEnabled = false;
       Serial.println("Sensor logging DISABLED.");
-      publishMQTT(MQTT_DEBUG_LOG, "Sensor logging disabled.");
+      publishHelloEvent("Logging Disabled");
     }
     return;
   }
