@@ -9,9 +9,23 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.24.2"   // Firmware Version
+#define FWVersion "25.11.26.0"   // Firmware Version
+#define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.26.0  Updated MQTT topic tree + dual-beam telemetry refinements
+            - Adopted 2025 clean topic structure:
+                /System /Env /Cars /Calendar /Sensors /Config
+            - Standardized WiFi diagnostics under /System/wifi/
+            - Standardized hourly publish topic to /Cars/Hour
+            - Added retained season metadata publishes:
+                System/seasonFolder, System/seasonYear
+            - Added A→B follow-time telemetry:
+                Sensors/beamAB_ms
+            - Added Beam B broken-duration timing:
+                Sensors/beamB_broken_ms
+            - Updated dual-beam state machine logic for parity with CarCounter
+            - Unified timeToPass (TTP) and timeBetweenCars telemetry
 25.11.24.2  Added separate keep-alive timer in KeepMqttAlive() to publish
              select MQTT state values every 30 seconds if no cars are counted,
              ensuring remote dashboards stay updated during low traffic periods.
@@ -232,7 +246,7 @@ String bootTimestamp = "";  // GAL 25-11-22: Store boot timestamp for logging
 // **************************************************
 
 /***** MQTT TOPIC DEFINITIONS *****/
-#define THIS_MQTT_CLIENT "espGateCounter" // Look at line 90 and set variable for WiFi Client secure & PubSubClient 12/23/23
+
 int mqttKeepAlive = 30; // publish select values every x seconds to keep MQTT client connected
 // Keepalive timer independent of publishMQTT() resets
 unsigned long lastKeepAliveMillis = 0;
@@ -248,45 +262,45 @@ char topicBase[60];
 // =====================================================
 
 // ---------------- SYSTEM ----------------
-#define MQTT_PUB_HELLO       "msb/traffic/GateCounter/System/hello"
-#define MQTT_PUB_FIRMWARE    "msb/traffic/GateCounter/System/firmware"
-#define MQTT_PUB_TIME        "msb/traffic/GateCounter/System/time"
-#define MQTT_PUB_HEARTBEAT   "msb/traffic/GateCounter/System/heartbeat"
-#define MQTT_DEBUG_LOG       "msb/traffic/GateCounter/System/debug"
-#define MQTT_COUNTER_LOG     "msb/traffic/GateCounter/System/CounterLog"
-#define MQTT_PUB_SEASON_FOLDER "msb/traffic/GateCounter/System/seasonFolder"
-#define MQTT_PUB_SEASON_YEAR   "msb/traffic/GateCounter/System/seasonYear"
+#define MQTT_PUB_HELLO          "msb/traffic/GateCounter/System/hello"
+#define MQTT_PUB_FIRMWARE       "msb/traffic/GateCounter/System/firmware"
+#define MQTT_PUB_TIME           "msb/traffic/GateCounter/System/time"
+#define MQTT_DEBUG_LOG          "msb/traffic/GateCounter/System/debug"
+#define MQTT_PUB_HEARTBEAT      "msb/traffic/GateCounter/System/heartbeat"
 
+/* Season metadata (shared SD/season logic) */
+#define MQTT_PUB_SEASON_FOLDER  "msb/traffic/GateCounter/System/seasonFolder"
+#define MQTT_PUB_SEASON_YEAR    "msb/traffic/GateCounter/System/seasonYear"
 
 // WiFi diagnostics (retained)
-#define MQTT_PUB_WIFI_SSID   "msb/traffic/GateCounter/System/wifi_ssid"
-#define MQTT_PUB_WIFI_RSSI   "msb/traffic/GateCounter/System/wifi_rssi"
-#define MQTT_PUB_WIFI_IP     "msb/traffic/GateCounter/System/wifi_ip"
+#define MQTT_PUB_WIFI_SSID   "msb/traffic/GateCounter/System/wifi/ssid"
+#define MQTT_PUB_WIFI_RSSI   "msb/traffic/GateCounter/System/wifi/rssi"
+#define MQTT_PUB_WIFI_IP     "msb/traffic/GateCounter/System/wifi/ip"
 
 // ---------------- ENV ----------------
 // retained JSON: {"tempF": xx.x, "humidity": xx.x}
 #define MQTT_PUB_TEMP        "msb/traffic/GateCounter/Env/tempHumidity"
 
 // ---------------- CARS ----------------
-#define MQTT_PUB_EXIT_CARS       "msb/traffic/GateCounter/Cars/ExitTotal"
-#define MQTT_PUB_INPARK_CARS     "msb/traffic/GateCounter/Cars/InParkCars"
-#define MQTT_PUB_SHOWTOTAL       "msb/traffic/GateCounter/Cars/ShowTotal"
-#define MQTT_PUB_CARS_HOURLY     "msb/traffic/GateCounter/Cars/Hourly"
+#define MQTT_PUB_EXIT_CARS        "msb/traffic/GateCounter/Cars/ExitTotal"
+#define MQTT_PUB_INPARK_CARS      "msb/traffic/GateCounter/Cars/InParkCars"
+#define MQTT_PUB_SHOWTOTAL        "msb/traffic/GateCounter/Cars/ShowTotal"
+#define MQTT_PUB_CARS_HOURLY      "msb/traffic/GateCounter/Cars/hour/"
+#define MQTT_PUB_HOURLY_JSON      "msb/traffic/GateCounter/Cars/hour/json"
+#define MQTT_PUB_BETWEENCARS_MS   "msb/traffic/GateCounter/Cars/timeBetweenCars"
 
 // ---------------- CALENDAR ----------------
 #define MQTT_PUB_DAYOFMONTH  "msb/traffic/GateCounter/Calendar/DayOfMonth"
 #define MQTT_PUB_DAYSRUNNING "msb/traffic/GateCounter/Calendar/DaysRunning"
 #define MQTT_PUB_SUMMARY     "msb/traffic/GateCounter/Calendar/Summary"
 
-// ---------------- SENSORS ----------------
-#define MQTT_PUB_TTP             "msb/traffic/GateCounter/Sensors/TTP"
-#define MQTT_PUB_BETWEENCARS_MS  "msb/traffic/GateCounter/Sensors/betweenCars"
-
-// 2025 dual-beam naming (A upstream, B downstream)
+// 2025 dual-beam Sensors and Logs (A upstream, B downstream)
 #define MQTT_PUB_BEAM_A_STATE     "msb/traffic/GateCounter/Sensors/beamAState"
 #define MQTT_PUB_BEAM_B_STATE     "msb/traffic/GateCounter/Sensors/beamBState"
 #define MQTT_PUB_BEAM_AB_MS       "msb/traffic/GateCounter/Sensors/beamAB_ms"
 #define MQTT_PUB_BEAM_B_BROKEN_MS "msb/traffic/GateCounter/Sensors/beamB_broken_ms"
+#define MQTT_PUB_TTP              "msb/traffic/GateCounter/Sensors/TTP"
+#define MQTT_COUNTER_LOG          "msb/traffic/GateCounter/Sensors/CounterLog"
 
 // ---------------- CONFIG (subscribed setpoints/toggles) ----------------
 #define MQTT_SUB_GATE_RESET_DAILY   "msb/traffic/GateCounter/Config/resetDailyCount"
@@ -315,8 +329,8 @@ unsigned long lastRawBChangeMs = 0;
 // CarCounter-style states
 enum GateDetectState {
     WAITING_FOR_CAR,
-    BEAM_A_BROKEN,
-    BOTH_BEAMS_BROKEN,
+    BEAM_A_HIGH,
+    BOTH_BEAMS_HIGH,
     CAR_DETECTED
 };
 GateDetectState gateDetectState = WAITING_FOR_CAR;
@@ -1964,12 +1978,12 @@ void detectCar() {
             // Start on Beam A broken while B is still clear
             if (aBroken && !bBroken) {
                 beamATripTime_ms = currentMillis;
-                gateDetectState = BEAM_A_BROKEN;
+                gateDetectState = BEAM_A_HIGH;
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A broken (event start).");
             }
             break;
 
-        case BEAM_A_BROKEN:
+        case BEAM_A_HIGH:
             // Beam B follows → validate minimum activation
             if (bBroken) {
 
@@ -1983,8 +1997,8 @@ void detectCar() {
                 if (timeBeamsHigh >= minActivationDuration) {
                     bothBeamsBroken_ms = currentMillis;
                     carPresentFlag = true;
-                    gateDetectState = BOTH_BEAMS_BROKEN;
-                    publishMQTT(MQTT_COUNTER_LOG, "State changed: Both beams broken.");
+                    gateDetectState = BOTH_BEAMS_HIGH;
+                    publishMQTT(MQTT_COUNTER_LOG, "State changed: Both beams High.");
                 }
             }
             // If A clears before B breaks → reset
@@ -2000,10 +2014,10 @@ void detectCar() {
             }
             break;
 
-        case BOTH_BEAMS_BROKEN:
+        case BOTH_BEAMS_HIGH:
             // Stuck-vehicle alarm (uses your existing timeout)
             if ((currentMillis - beamATripTime_ms) >= (unsigned long)gateCounterTimeout) {
-                publishMQTT(MQTT_PUB_HELLO, "Check Gate Counter! Vehicle stuck.");
+                publishMQTT(MQTT_COUNTER_LOG, "Check Gate Counter! Vehicle stuck.");
             }
 
             // When Beam B clears, validate duration and move to count
@@ -2018,6 +2032,7 @@ void detectCar() {
 
                 if (brokenDuration >= (unsigned long)carDetectMS) {
                     gateDetectState = CAR_DETECTED;
+                    publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
                 } else {
                     // Not a car → reset
                     carPresentFlag = false;
@@ -2038,8 +2053,8 @@ void detectCar() {
 
                 // Between cars
                 if (lastCarDetected_ms > 0) {
-                    unsigned long betweenCars = currentMillis - lastCarDetected_ms;
-                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(betweenCars), true);
+                    unsigned long timeBetweenCars = currentMillis - lastCarDetected_ms;
+                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars), true);
                 }
                 lastCarDetected_ms = currentMillis;
 
@@ -2050,7 +2065,7 @@ void detectCar() {
             break;
     }
 }
-// END CAR DETECTION
+// END GATE CAR DETECTION
 
 
 
@@ -2236,10 +2251,8 @@ void timeTriggeredEvents() {
     // Reset hourly counts at midnight
     if (now.hour() == 23 && now.minute() == 59 && !flagMidnightReset) { 
         resetHourlyCounts();  // Reset array for collecting hourly car counts      
-        totalDailyCars = 0;   // Reset total daily cars to 0 at midnight
-        saveDailyTotal();
-        publishMQTT(MQTT_DEBUG_LOG, "Total cars reset at Midnight");
-        flagMidnightReset = true;
+        totalDailyCars = 0;   // Reset total daily cars to 0 at midnight 
+        saveDailyTotal();        publishMQTT(MQTT_DEBUG_LOG, "Total cars reset at Midnight");        flagMidnightReset = true;
     }
     
     // Increment days running only if not Christmas Eve
