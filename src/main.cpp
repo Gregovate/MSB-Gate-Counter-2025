@@ -9,10 +9,21 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.26.1"   // Firmware Version
+#define FWVersion "25.11.27.0"   // Firmware Version
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.27.0  Added CarCounter calendar mirroring support:
+                - Added subscriptions for CarCounter dayOfMonth and daysRunning.
+                - Added callback handlers to mirror CarCounter calendar values into GateCounter.
+                - GateCounter now republishes mirrored values under its own Calendar topics
+                  (msb/traffic/GateCounter/Calendar/DayOfMonth and DaysRunning).
+                - Prevents overnight drift between devices; CarCounter is now authoritative.
+             Restored publication of timing configuration values:
+                - gateCounterTimeout (ms) now republished as retained.
+                - carDetectMS (ms) republished as retained.
+                - Ensures visibility in HA and MQTT Explorer even after reboot.
+             Minor cleanup of callback ordering for new config topics.
 25.11.26.1  GAL Standardized System/hello payload to JSON object:
                { "device":..., "status":..., "fw":..., "boot":..., "msg":... }
              Added publishHello(status,msg,retain) helper for retained
@@ -318,6 +329,9 @@ char topicBase[60];
 #define MQTT_SUB_GATE_TIMEOUT       "msb/traffic/GateCounter/Config/gateCounterTimeout"
 #define MQTT_SUB_CARMS              "msb/traffic/GateCounter/Config/carDetectMS"
 #define MQTT_SUB_LOGGING            "msb/traffic/GateCounter/Config/loggingEnabled"
+#define MQTT_SUB_CC_DAY_OF_MONTH  "msb/traffic/CarCounter/Calendar/dayOfMonth"
+#define MQTT_SUB_CC_DAYS_RUNNING  "msb/traffic/CarCounter/Calendar/daysRunning"
+
 
 // ---------------- CAR COUNTER INPUTS (new tree) ----------------
 #define MQTT_SUB_CC_ENTER_TOTAL     "msb/traffic/CarCounter/Cars/EnterTotal"
@@ -354,7 +368,15 @@ unsigned long timeToPassMS = 0;          // Time from start of detection to conf
 // Filters / windows (match your proven behavior)
 const unsigned long minActivationDuration = 150; // ignore tiny blips
 const unsigned long maxABFollow_ms = 750;    
+
+// GAL 25-11-27: Minimum time (ms) both beams must be broken
+// to qualify as a real vehicle instead of noise.
 static int carDetectMS = 1200;           // Minimum wait duration for a vehicle to be confirmed
+
+// GAL 25-11-27: Max time (ms) a car can block the exit path
+// before we publish a "Vehicle stuck" alarm.
+// Updated live from HA via msb/traffic/GateCounter/Config/gateCounterTimeout.
+int gateCounterTimeout = 60000; // default time for car counter alarm in millis
 
 
 /***** OTA & WEBSERVER SETUP *****/
@@ -478,7 +500,7 @@ const unsigned long wifi_connectioncheckMillis = 5000; // check for connection e
 const unsigned long mqtt_connectionCheckMillis = 30000; // check for connection
 unsigned long start_MqttMillis; // for Keep Alive Timer
 unsigned long start_WiFiMillis; // for keep Alive Timer
-int gateCounterTimeout = 60000; // default time for car counter alarm in millis
+
 char buf2[25] = "YYYY-MM-DD hh:mm:ss"; // time car detected
 
 //***** DAILY RESET FLAGS *****
@@ -1144,7 +1166,6 @@ void MQTTreconnect() {
                 // Subscribe to necessary topics (NEW TREE)
                 mqtt_client.subscribe(MQTT_SUB_CC_ENTER_TOTAL);
                 mqtt_client.subscribe(MQTT_SUB_CC_SHOW_TOTAL);
-
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAILY);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_SHOW);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DOM);
@@ -1153,6 +1174,8 @@ void MQTTreconnect() {
                 mqtt_client.subscribe(MQTT_SUB_CARMS);
                 mqtt_client.subscribe(MQTT_SUB_LOGGING);
                 mqtt_client.subscribe(MQTT_SUB_CC_SHOW_START_DATE);
+                mqtt_client.subscribe(MQTT_SUB_CC_DAY_OF_MONTH);
+                mqtt_client.subscribe(MQTT_SUB_CC_DAYS_RUNNING);
 
 
                 // Log subscriptions
@@ -1664,8 +1687,9 @@ void getSavedValuesOnReboot() {
     // -------------------------------------------------
     inParkCars = carCounterCars - totalDailyCars;
 
-    publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),     true);
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),    true);
+    // Calendar is now sourced from CarCounter → callback mirror
+    // publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),     true);
+    // publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),    true);
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
     publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);
     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
@@ -1689,37 +1713,20 @@ static inline bool topicIs(const char* t, const char* target) {
   return strcmp(t, target) == 0;
 }
 
-// // GAL 25-11-26: Standardize HELLO as JSON status/event channel
-// static inline void publishHello(const char* status, const char* msg, bool retainFlag) {
-//   char buf[256];
-
-//   snprintf(buf, sizeof(buf),
-//       "{"
-//         "\"device\":\"%s\","
-//         "\"status\":\"%s\","
-//         "\"fw\":\"%s\","
-//         "\"boot\":\"%s\","
-//         "\"msg\":\"%s\""
-//       "}",
-//       THIS_MQTT_CLIENT,
-//       status,
-//       FWVersion,
-//       bootTimestamp.c_str(),
-//       msg
-//   );
-
-//   publishMQTT(MQTT_PUB_HELLO, String(buf), retainFlag);
-// }
-
-// // Convenience wrapper for non-retained config/info events
-// static inline void publishHelloEvent(const char* msg) {
-//   publishHello("event", msg, false);
-// }
 
 
 static inline void publishStateExitInPark() {
   publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
   publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+}
+
+// GAL 25-11-27: Publish timing configuration (for MQTT/HA visibility)
+static inline void publishTimingConfig() {
+  // These use the same topics you subscribe to:
+  //   msb/traffic/GateCounter/Config/gateCounterTimeout
+  //   msb/traffic/GateCounter/Config/carDetectMS
+  publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
+  publishMQTT(MQTT_SUB_CARMS,        String(carDetectMS),        true);
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -1752,6 +1759,32 @@ void callback(char* topic, byte* payload, unsigned int length) {
       debugInPark("EnterUpdate");
       lastcarCounterCars = carCounterCars;
     }
+    return;
+  }
+
+  // -------------------------------------------------
+  // Car Counter → Calendar mirror to GateCounter
+  // -------------------------------------------------
+  if (topicIs(topic, MQTT_SUB_CC_DAY_OF_MONTH)) {
+    dayOfMonth = atoi(message);
+    saveDayOfMonth();
+
+    // Re-publish under the GateCounter tree so HA keeps using existing sensors
+    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
+
+    Serial.print(F(" GateCounter DayOfMonth mirrored from CarCounter: "));
+    Serial.println(dayOfMonth);
+    return;
+  }
+
+  if (topicIs(topic, MQTT_SUB_CC_DAYS_RUNNING)) {
+    daysRunning = atoi(message);
+    saveDaysRunning();
+
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
+
+    Serial.print(F(" GateCounter DaysRunning mirrored from CarCounter: "));
+    Serial.println(daysRunning);
     return;
   }
 
@@ -1800,7 +1833,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   if (topicIs(topic, MQTT_SUB_GATE_TIMEOUT)) {
     gateCounterTimeout = atoi(message);
-    Serial.println(F(" Gate Counter Alarm Timer Updated"));
+    Serial.print(F(" Gate Counter Alarm Timer Updated (ms): "));
+    Serial.println(gateCounterTimeout);
+
+    // // Echo the new value back out so MQTT has a retained state
+    // publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
 
     publishHelloEvent("Gate Counter Timeout Updated");
     return;
@@ -1808,7 +1845,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   if (topicIs(topic, MQTT_SUB_CARMS)) {
     carDetectMS = atoi(message);
-    Serial.println(F(" Gate Counter carDetectMS Updated"));
+    Serial.print(F(" Gate Counter carDetectMS Updated (ms): "));
+    Serial.println(carDetectMS);
+
+    // DO NOT echo this topic back to MQTT – HA owns this value.
+    // publishMQTT(MQTT_SUB_CARMS, String(carDetectMS), true);
 
     publishHelloEvent("Gate Counter carDetectMS Updated");
     return;
@@ -2526,6 +2567,9 @@ void setup() {
     // Force MQTT to correct states on every reboot (RETAINED!)
     publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
     publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
+    
+    // GAL 25-11-27: Make sure default timing config is visible on MQTT
+    publishTimingConfig();
 
     // Sync last-states so loop doesn't immediately republish
     lastBeamAState  = beamAState;
