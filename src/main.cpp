@@ -379,6 +379,7 @@ unsigned long beamATripTime_ms = 0;        // when Beam A first broke
 unsigned long bothBeamsBroken_ms = 0;      // when both beams confirmed broken
 unsigned long lastCarDetected_ms = 0;      // for betweenCars
 bool carPresentFlag = false;
+static bool gateStuckAlarmActive = false;
 
 unsigned long timeToPassMS = 0;          // Time from start of detection to confirmation
 
@@ -388,12 +389,12 @@ const unsigned long maxABFollow_ms = 750;
 
 // GAL 25-11-27: Minimum time (ms) both beams must be broken
 // to qualify as a real vehicle instead of noise.
-static int carDetectMS = 1200;           // Minimum wait duration for a vehicle to be confirmed
+unsigned long carDetectMS = 1000;           // Minimum wait duration for a vehicle to be confirmed
 
 // GAL 25-11-27: Max time (ms) a car can block the exit path
 // before we publish a "Vehicle stuck" alarm.
 // Updated live from HA via msb/traffic/GateCounter/Config/gateCounterTimeout.
-int gateCounterTimeout = 60000; // default time for car counter alarm in millis
+unsigned long gateCounterTimeout = 60000; // default time for car counter alarm in millis
 
 
 /***** OTA & WEBSERVER SETUP *****/
@@ -2126,9 +2127,10 @@ void detectCar() {
 
     case BOTH_BEAMS_HIGH:
         // Stuck-vehicle alarm (uses your existing timeout)
-        if ((currentMillis - beamATripTime_ms) >= (unsigned long)gateCounterTimeout) {
+        if ((currentMillis - beamATripTime_ms) >= gateCounterTimeout) {
             publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
             publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
+            gateStuckAlarmActive = true;   // latch so we don't spam
         }
 
         // When Beam B clears, validate duration and move to count
@@ -2141,7 +2143,7 @@ void detectCar() {
             );
             publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
 
-            if (brokenDuration >= (unsigned long)carDetectMS) {
+            if (brokenDuration >= carDetectMS) {
                 gateDetectState = CAR_DETECTED;
                 publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
             } else {
@@ -2149,6 +2151,12 @@ void detectCar() {
                 carPresentFlag = false;
                 gateDetectState = WAITING_FOR_CAR;
                 publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
+            }
+
+            // Beam B just cleared → if we had a stuck alarm, clear it now
+            if (gateStuckAlarmActive) {
+                publishMQTT(MQTT_PUB_ALARM, "CLEAR", false);
+                gateStuckAlarmActive = false;
             }
         }
         break;
