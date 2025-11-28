@@ -9,10 +9,25 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.27.0"   // Firmware Version
+#define FWVersion "25.11.28.1"   // Firmware Version
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.28.1   Increased DHT sensor read interval from 10 seconds to 60 seconds to 
+                 reduce sensor polling frequency and added a warm-up period on boot.
+                 mimics Car Counter behavior.
+25.11.28.0  - Standardized stuck/alarm behavior for Gate Counter:
+                * When BOTH_BEAMS_HIGH exceeds gateCounterTimeout, now publish:
+                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
+                    publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
+                This matches the Car Counter pattern and unifies the stuck message text.
+            - Cleaned up System/hello usage:
+                * Replaced all publishHelloEvent("...") calls in the MQTT callback with
+                publishDebugLog("...") so that config/status updates go to:
+                    msb/traffic/GateCounter/System/debug
+                and System/hello remains a retained ONLINE JSON status only.
+                * Removed the unused publishHelloEvent() helper wrapper.
+            - No changes to MQTT topics, unique IDs, timeout tuning behavior, or heartbeat payload.
 25.11.27.0  Added CarCounter calendar mirroring support:
                 - Added subscriptions for CarCounter dayOfMonth and daysRunning.
                 - Added callback handlers to mirror CarCounter calendar values into GateCounter.
@@ -286,6 +301,8 @@ char topicBase[60];
 #define MQTT_PUB_TIME           "msb/traffic/GateCounter/System/time"
 #define MQTT_DEBUG_LOG          "msb/traffic/GateCounter/System/debug"
 #define MQTT_PUB_HEARTBEAT      "msb/traffic/GateCounter/System/heartbeat"
+#define MQTT_PUB_ALARM          "msb/traffic/GateCounter/Alarm"
+
 
 /* Season metadata (shared SD/season logic) */
 #define MQTT_PUB_SEASON_FOLDER  "msb/traffic/GateCounter/System/seasonFolder"
@@ -435,8 +452,8 @@ String getRtcTimestamp() {
 
 // Initialize DHT sensor & Variables for temperature and humidity readTempandRH()
 DHT dht(DHTPIN, DHTTYPE);
-float tempF = 0.0;  // Temperature
-float humidity = 0.0;     // Humidity
+float tempF = -998.0;  // Temperature
+float humidity = -998.0;     // Humidity
 
 /** Display Definitions & variables **/
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -1086,13 +1103,6 @@ static inline void publishHello(const char* status, const char* msg, bool retain
 
   publishMQTT(MQTT_PUB_HELLO, String(buf), retainFlag);
 }
-
-// Convenience wrapper for non-retained config/info events
-static inline void publishHelloEvent(const char* msg) {
-  publishHello("event", msg, false);
-}
-
-
 
 
 //GATE COUNTER Connection to MQTT Server
@@ -1797,7 +1807,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Gate Counter Updated"));
 
     publishStateExitInPark();
-    publishHelloEvent("Daily Total Updated");
+    publishDebugLog("Daily Total Updated");
     return;
   }
 
@@ -1807,7 +1817,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Show Counter Updated"));
 
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
-    publishHelloEvent("Show Counter Updated");
+    publishDebugLog("Show Counter Updated");
     return;
   }
 
@@ -1817,7 +1827,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Calendar Day of Month Updated"));
 
     publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
-    publishHelloEvent("Calendar Day Updated");
+    publishDebugLog("Calendar Day Updated");
     return;
   }
 
@@ -1827,7 +1837,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(F(" Days Running Updated"));
 
     publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-    publishHelloEvent("Days Running Reset");
+    publishDebugLog("Days Running Reset");
     return;
   }
 
@@ -1839,7 +1849,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // // Echo the new value back out so MQTT has a retained state
     // publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
 
-    publishHelloEvent("Gate Counter Timeout Updated");
+    publishDebugLog("Gate Counter Timeout Updated");
     return;
   }
 
@@ -1851,7 +1861,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // DO NOT echo this topic back to MQTT – HA owns this value.
     // publishMQTT(MQTT_SUB_CARMS, String(carDetectMS), true);
 
-    publishHelloEvent("Gate Counter carDetectMS Updated");
+    publishDebugLog("Gate Counter carDetectMS Updated");
     return;
   }
 
@@ -1859,11 +1869,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if (strcmp(message, "1") == 0) {
       loggingEnabled = true;
       Serial.println("Sensor logging ENABLED.");
-      publishHelloEvent("Logging Enabled");
+      publishDebugLog("Logging Enabled");
     } else if (strcmp(message, "0") == 0) {
       loggingEnabled = false;
       Serial.println("Sensor logging DISABLED.");
-      publishHelloEvent("Logging Disabled");
+      publishDebugLog("Logging Disabled");
     }
     return;
   }
@@ -2114,33 +2124,34 @@ void detectCar() {
             }
             break;
 
-        case BOTH_BEAMS_HIGH:
-            // Stuck-vehicle alarm (uses your existing timeout)
-            if ((currentMillis - beamATripTime_ms) >= (unsigned long)gateCounterTimeout) {
-                publishMQTT(MQTT_COUNTER_LOG, "Check Gate Counter! Vehicle stuck.");
+    case BOTH_BEAMS_HIGH:
+        // Stuck-vehicle alarm (uses your existing timeout)
+        if ((currentMillis - beamATripTime_ms) >= (unsigned long)gateCounterTimeout) {
+            publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
+            publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
+        }
+
+        // When Beam B clears, validate duration and move to count
+        if (!bBroken && carPresentFlag) {
+            unsigned long brokenDuration = currentMillis - bothBeamsBroken_ms;
+
+            publishMQTT(
+                MQTT_COUNTER_LOG,
+                "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
+            );
+            publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
+
+            if (brokenDuration >= (unsigned long)carDetectMS) {
+                gateDetectState = CAR_DETECTED;
+                publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
+            } else {
+                // Not a car → reset
+                carPresentFlag = false;
+                gateDetectState = WAITING_FOR_CAR;
+                publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
             }
-
-            // When Beam B clears, validate duration and move to count
-            if (!bBroken && carPresentFlag) {
-                unsigned long brokenDuration = currentMillis - bothBeamsBroken_ms;
-
-                publishMQTT(
-                    MQTT_COUNTER_LOG,
-                    "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
-                );
-                publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
-
-                if (brokenDuration >= (unsigned long)carDetectMS) {
-                    gateDetectState = CAR_DETECTED;
-                    publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
-                } else {
-                    // Not a car → reset
-                    carPresentFlag = false;
-                    gateDetectState = WAITING_FOR_CAR;
-                    publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
-                }
-            }
-            break;
+        }
+        break;
 
         case CAR_DETECTED:
             if (carPresentFlag) {
@@ -2269,68 +2280,91 @@ void initSDCard() {
   display.display();
 }
 
-// Gate Counter Temperature and Humidity Reading
+// Gate Counter Temperature and Humidity Reading (mirrors Car Counter behavior)
 void readTempandRH() {
-    static unsigned long lastDHTReadMillis = 0;
-    static unsigned long lastDHTPrintMillis = 0;
-    const unsigned long dhtReadInterval = 10000;   // 10s
-    const unsigned long dhtPrintInterval = 600000; // 10m
+    // --- Non-blocking warmup and timing state (function-local statics) ---
+    static bool dhtWarmupDone = false;
+    static unsigned long dhtWarmupStart = 0;
+
+    static unsigned long lastDHTReadMillis  = 0;    // Last time temperature was read
+    static unsigned long lastDHTPrintMillis = 0;    // Last time temperature was printed
+
+    const unsigned long DHT_WARMUP_MS      = 10000;   // 10 seconds warmup
+    const unsigned long dhtReadInterval    = 60000;   // 60 seconds interval for reading temp
+    const unsigned long dhtPrintInterval   = 600000;  // 10 minutes interval for printing temp
+
     static bool tempOutOfRangeReported = false;
 
     unsigned long currentMillis = millis();
 
-    if (currentMillis - lastDHTReadMillis >= dhtReadInterval) {
-        lastDHTReadMillis = currentMillis;
+    // --- Warmup gate: don't touch tempF/humidity until sensor has stabilized ---
+    if (!dhtWarmupDone) {
+        if (dhtWarmupStart == 0) {
+            dhtWarmupStart = currentMillis;  // start warmup on first call
+        }
+        if (currentMillis - dhtWarmupStart < DHT_WARMUP_MS) {
+            return;  // too early, skip DHT entirely
+        }
+        dhtWarmupDone = true;  // from now on, reads are allowed
+    }
 
-        // Read temperature and humidity
-        humidity = dht.readHumidity();
-        tempF   = dht.readTemperature(true); // Fahrenheit
+    // --- Interval gate: only read every dhtReadInterval ms ---
+    if (currentMillis - lastDHTReadMillis < dhtReadInterval) {
+        return;
+    }
+    lastDHTReadMillis = currentMillis;
 
-        // Check if the readings are valid (NaN only, same as CarCounter)
-        if (isnan(tempF) || isnan(humidity)) {
-            Serial.println("Failed to read from DHT sensor!");
-            publishDebugLog("DHT sensor reading failed.");
-            tempF = -999;
-            humidity = -999;
-            return;
+    // Read temperature and humidity
+    humidity = dht.readHumidity();
+    tempF   = dht.readTemperature(true); // Read Fahrenheit directly
+
+    // Check if the readings are valid
+    if (isnan(tempF) || isnan(humidity)) {
+        Serial.println("Failed to read from DHT sensor!");
+        publishDebugLog("DHT sensor reading failed.");
+        tempF    = -999;  // sentinel for failure
+        humidity = -999;
+        return; // Exit function if the readings are invalid
+    }
+
+    // Check for temperature out of range
+    if (tempF < -40 || tempF > 120) {
+        if (!tempOutOfRangeReported) {
+            Serial.println("Temperature out of range!");
+            publishDebugLog("DHT temperature out of range: " + String(tempF));
+            tempOutOfRangeReported = true; // prevent duplicate reporting
+        }
+        tempF = -999; // sentinel for out-of-range condition
+    } else {
+        // Reset the flag if temperature is back in range
+        if (tempOutOfRangeReported) {
+            Serial.println("Temperature back in range.");
+            tempOutOfRangeReported = false;
         }
 
-        // Check for temperature out of range (same as CarCounter)
-        if (tempF < -40 || tempF > 120) {
-            if (!tempOutOfRangeReported) {
-                Serial.println("Temperature out of range!");
-                publishDebugLog("DHT temperature out of range: " + String(tempF));
-                tempOutOfRangeReported = true;
-            }
-            tempF = -999;
+        // Build JSON for temp/RH (actual MQTT publish happens elsewhere)
+        char jsonPayload[100];
+        snprintf(jsonPayload, sizeof(jsonPayload),
+                 "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
+        // Do NOT publish here – Gate now matches Car: temp/RH publish happens
+        // in the periodic MQTT/keepalive logic, not on every sensor read.
+
+        // Forward valid readings to the hourly average system
+        averageHourlyTemp(); // Ensure the reading is processed for summaries
+    }
+
+    // --- 10-minute printout for serial diagnostics ---
+    if (currentMillis - lastDHTPrintMillis >= dhtPrintInterval) {
+        lastDHTPrintMillis = currentMillis;
+
+        if (tempF != -999 && humidity != -999) {
+            Serial.printf("Temperature: %.1f °F, Humidity: %.1f %%\n", tempF, humidity);
         } else {
-            if (tempOutOfRangeReported) {
-                Serial.println("Temperature back in range.");
-                tempOutOfRangeReported = false;
-            }
-
-            // Publish JSON (already matches CarCounter)
-            char jsonPayload[100];
-            snprintf(jsonPayload, sizeof(jsonPayload),
-                     "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-            publishMQTT(MQTT_PUB_TEMP, String(jsonPayload));
-
-            averageHourlyTemp();
-        }
-
-        // Print every 10 minutes
-        if (currentMillis - lastDHTPrintMillis >= dhtPrintInterval) {
-            lastDHTPrintMillis = currentMillis;
-
-            if (tempF != -999 && humidity != -999) {
-                Serial.printf("Temperature: %.1f °F, Humidity: %.1f %%\n",
-                              tempF, humidity);
-            } else {
-                Serial.println("Temperature/Humidity data invalid. Check sensor.");
-            }
+            Serial.println("Temperature/Humidity data invalid. Check sensor.");
         }
     }
 }
+
 
 
 
@@ -2511,8 +2545,6 @@ void setup() {
     wifiMulti.addAP(secret_ssid_AP_5, secret_pass_AP_5);
     setup_wifi();  
 
-
-
     //If RTC not present, stop and check battery
     if (! rtc.begin()) {
         rtcReady = false;
@@ -2545,8 +2577,7 @@ void setup() {
     } else {
         bootTimestamp = "rtc-not-ready";
     }
-    
-
+  
     // MQTT Reconnection with login credentials
     MQTTreconnect(); // Ensure MQTT is connected
 
@@ -2578,7 +2609,6 @@ void setup() {
     // Initialize DHT sensor
     dht.begin();
     Serial.println("DHT22 sensor initialized.");
-    readTempandRH();
     
     display.clearDisplay();
     display.setTextColor(WHITE);
