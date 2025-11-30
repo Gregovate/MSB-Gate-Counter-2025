@@ -9,10 +9,15 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.30.0"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.11.30.1"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.30.1   Fixed TimeToPass_ms logging order so correct TTP is written for the
+             current car. Removed tempF from ExitLog.csv output. Added
+             AB_Follow_ms to ExitLog.csv. Updated CSV write order and created
+             new header: "DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars,
+             AB_Follow_ms, BeamA_Trip_ms".
 25.11.30.0   Added /reboot for webserver. Changed variable name abFollow to
             abFollow_ms for clarity.
 25.11.29.0   Fixed SD File Manager path handling across all operations 
@@ -2032,17 +2037,29 @@ void countTheCar() {
     // open file for writing Car Data
     myFile = SD.open(fileName6, FILE_APPEND);
     if (myFile) {
+        // DateTime
         myFile.print(now.toString(buf2));
         myFile.print(", ");
+
+        // TimeToPass_ms (A broken -> B cleared)
         myFile.print(timeToPassMS);
         myFile.print(", ");
+
+        // ExitDailyTotal
         myFile.print(totalDailyCars);
         myFile.print(", ");
+
+        // InParkCars
         myFile.print(inParkCars);
         myFile.print(", ");
-        myFile.print(tempF);
-        myFile.print(" , ");
+
+        // AB_Follow_ms (A -> B follow time)
+        myFile.print(abFollow_ms);
+        myFile.print(", ");
+
+        // BeamA_Trip_ms (raw millis when A tripped)
         myFile.println(beamATripTime_ms);
+
         myFile.close();
 
         // ---- Event-driven state publishes (NEW tree) ----
@@ -2160,57 +2177,57 @@ void detectCar() {
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A cleared before Beam B. Reset.");
             }
 
-            // If B never follows within 750 ms → reset (your proven rule)
+            // If B never follows within 900 ms → reset (your proven rule)
             if (!bBroken && (currentMillis - beamATripTime_ms > maxABFollow_ms)) {
                 gateDetectState = WAITING_FOR_CAR;
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A timeout (no Beam B within 750 ms). Reset.");
             }
             break;
 
-    case BOTH_BEAMS_HIGH:
-        // Stuck-vehicle alarm (uses your existing timeout)
-        if ((currentMillis - beamATripTime_ms) >= gateCounterTimeout) {
-            publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
-            publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
-            gateStuckAlarmActive = true;   // latch so we don't spam
-        }
-
-        // When Beam B clears, validate duration and move to count
-        if (!bBroken && carPresentFlag) {
-            unsigned long brokenDuration = currentMillis - bothBeamsBroken_ms;
-
-            publishMQTT(
-                MQTT_COUNTER_LOG,
-                "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
-            );
-            publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
-
-            if (brokenDuration >= carDetectMS) {
-                gateDetectState = CAR_DETECTED;
-                publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
-            } else {
-                // Not a car → reset
-                carPresentFlag = false;
-                gateDetectState = WAITING_FOR_CAR;
-                publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
+        case BOTH_BEAMS_HIGH:
+            // Stuck-vehicle alarm (uses your existing timeout)
+            if ((currentMillis - beamATripTime_ms) >= gateCounterTimeout) {
+                publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
+                publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
+                gateStuckAlarmActive = true;   // latch so we don't spam
             }
 
-            // Beam B just cleared → if we had a stuck alarm, clear it now
-            if (gateStuckAlarmActive) {
-                publishMQTT(MQTT_PUB_ALARM, "CLEAR", false);
-                gateStuckAlarmActive = false;
+            // When Beam B clears, validate duration and move to count
+            if (!bBroken && carPresentFlag) {
+                unsigned long brokenDuration = currentMillis - bothBeamsBroken_ms;
+
+                publishMQTT(
+                    MQTT_COUNTER_LOG,
+                    "Beam B clear. Broken duration: " + String(brokenDuration) + " ms"
+                );
+                publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
+
+                if (brokenDuration >= carDetectMS) {
+                    gateDetectState = CAR_DETECTED;
+                    publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
+                } else {
+                    // Not a car → reset
+                    carPresentFlag = false;
+                    gateDetectState = WAITING_FOR_CAR;
+                    publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
+                }
+
+                // Beam B just cleared → if we had a stuck alarm, clear it now
+                if (gateStuckAlarmActive) {
+                    publishMQTT(MQTT_PUB_ALARM, "CLEAR", false);
+                    gateStuckAlarmActive = false;
+                }
             }
-        }
-        break;
+            break;
 
         case CAR_DETECTED:
             if (carPresentFlag) {
-                countTheCar();
-
                 // TTP from Beam A broken to Beam B clear
                 timeToPassMS = currentMillis - beamATripTime_ms;
                 publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
                 publishMQTT(MQTT_COUNTER_LOG, "Car confirmed and counted!");
+
+                countTheCar();
 
                 // Between cars
                 if (lastCarDetected_ms > 0) {
@@ -2696,7 +2713,7 @@ void setup() {
     checkAndCreateFile(fileName3);
     checkAndCreateFile(fileName4);
     //checkAndCreateFile(fileName5, "Date,Hour-17,Hour-18,Hour-19,Hour-20,Hour-21,Total,Temp");
-    checkAndCreateFile(fileName6, "Date Time,TimeToPass,Car#,Cars In Park,Temp,Car Detected Millis");
+    checkAndCreateFile(fileName6, "DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, BeamA_Trip_ms");
     checkAndCreateFile(fileName7, "Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
     checkAndCreateFile(fileName8);
     checkAndCreateFile(fileName9);
