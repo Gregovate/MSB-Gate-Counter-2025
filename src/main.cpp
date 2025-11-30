@@ -9,10 +9,12 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.29.0"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.11.30.0"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.30.0   Added /reboot for webserver. Changed variable name abFollow to
+            abFollow_ms for clarity.
 25.11.29.0   Fixed SD File Manager path handling across all operations 
                 (download, upload, delete, and directory changes) by applying 
                 unified buildPath() helper. Eliminated malformed paths such as 
@@ -394,7 +396,7 @@ unsigned long bothBeamsBroken_ms = 0;      // when both beams confirmed broken
 unsigned long lastCarDetected_ms = 0;      // for betweenCars
 bool carPresentFlag = false;
 static bool gateStuckAlarmActive = false;
-
+unsigned long abFollow_ms = 0;            // A to B follow time
 unsigned long timeToPassMS = 0;          // Time from start of detection to confirmation
 
 // Filters / windows (match your proven behavior)
@@ -875,6 +877,17 @@ void setupServer() {
         }
         request->send(SD, "/data/index.html", "text/html");
     });
+
+    // ----------------------------
+    // Enable Reboot via HTTP
+    // ----------------------------
+
+    server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/plain", "Gate Counter rebooting...");
+        Serial.println("HTTP /reboot requested – restarting ESP32");
+        delay(500);
+        ESP.restart();
+    });    
 
     // Serve CSS file
     server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -2128,8 +2141,8 @@ void detectCar() {
             if (bBroken) {
 
                 // A→B FOLLOW TIMING (correct location)
-                unsigned long abFollow = currentMillis - beamATripTime_ms;
-                publishMQTT(MQTT_PUB_BEAM_AB_MS, String(abFollow));
+                abFollow_ms = currentMillis - beamATripTime_ms;
+                publishMQTT(MQTT_PUB_BEAM_AB_MS, String(abFollow_ms));
 
                 // Validate minimum activation
                 unsigned long timeBeamsHigh = currentMillis - beamATripTime_ms;
