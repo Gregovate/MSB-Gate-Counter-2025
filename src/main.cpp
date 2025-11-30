@@ -4,15 +4,19 @@ Initial Build 12/5/2023 12:15 pm
 Counts vehicles as they exit the park
 Connects to WiFi and updates RTC on Boot
 Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operating at 12V
-Purpose: suppliments Car Counter to improve traffic control and determine park capacity
+Purpose: supplements Car Counter to improve traffic control and determine park capacity
 Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operating at 12V
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.30.1"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.11.30.2"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.30.2   Replaced rtc.toString(buf2) with explicit timestamp formatting in
+             countTheCar() to fix frozen timestamps in ExitLog.csv and MQTT
+             time publish. Now uses a local timeBuf built with snprintf so each
+             logged car gets a correct, advancing DateTime. Changed Rest time to 5:08PM
 25.11.30.1   Fixed TimeToPass_ms logging order so correct TTP is written for the
              current car. Removed tempF from ExitLog.csv output. Added
              AB_Follow_ms to ExitLog.csv. Updated CSV write order and created
@@ -2005,7 +2009,16 @@ void averageHourlyTemp() {
 // Car Counted, increment the counter by 1 and append to the Exitlog.csv log file on the SD card
 void countTheCar() {
     DateTime now = rtc.now();
-    Serial.print(now.toString(buf2));
+
+    // Build a fresh timestamp string (do NOT use now.toString(buf2) here)
+    char timeBuf[25];
+    snprintf(timeBuf, sizeof(timeBuf),
+             "%04d-%02d-%02d %02d:%02d:%02d",
+             now.year(), now.month(), now.day(),
+             now.hour(), now.minute(), now.second());
+
+    // Serial log
+    Serial.print(timeBuf);
     Serial.print(", Time to pass = ");
     Serial.println(timeToPassMS);
 
@@ -2471,10 +2484,10 @@ void timeTriggeredEvents() {
     }
 
     // Reset total daily cars for show to 0 at 5:10 PM
-    if (now.hour() == 17 && now.minute() == 10 && !flagDailyShowStartReset) {
+    if (now.hour() == 17 && now.minute() == 8 && !flagDailyShowStartReset) {
         totalDailyCars = 0;
         saveDailyTotal();
-        publishMQTT(MQTT_DEBUG_LOG, "Total Exit Cars Reset at 5:10 PM");
+        publishMQTT(MQTT_DEBUG_LOG, "Total Exit Cars Reset at 5:08 PM");
         flagDailyShowStartReset = true;
     }
 
