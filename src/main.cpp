@@ -9,10 +9,24 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.28.1"   // Firmware Version
+#define FWVersion "25.11.29.0"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.11.29.0   Fixed SD File Manager path handling across all operations 
+                (download, upload, delete, and directory changes) by applying 
+                unified buildPath() helper. Eliminated malformed paths such as 
+                //gc/2025 and restored proper file access.
+             Corrected header creation logic in checkAndCreateFile() to use 
+                println(), preventing header/data merge issues in ExitLog.csv 
+                 and ShowSummary.csv.
+             Increased maxABFollow_ms from 750ms to 900ms to prevent valid 
+                 slow A→B beam transitions from being discarded. Addresses 
+                undercounts observed during stopped/slow traffic.
+             Aligned upload/download path behavior with directory navigation 
+                to ensure consistent SD card file management.
+             No functional OTA or MQTT changes in this version; all updates 
+                limited to SD file logic and beam timing.
 25.11.28.1   Increased DHT sensor read interval from 10 seconds to 60 seconds to 
                  reduce sensor polling frequency and added a warm-up period on boot.
                  mimics Car Counter behavior.
@@ -385,7 +399,7 @@ unsigned long timeToPassMS = 0;          // Time from start of detection to conf
 
 // Filters / windows (match your proven behavior)
 const unsigned long minActivationDuration = 150; // ignore tiny blips
-const unsigned long maxABFollow_ms = 750;    
+const unsigned long maxABFollow_ms = 900;    
 
 // GAL 25-11-27: Minimum time (ms) both beams must be broken
 // to qualify as a real vehicle instead of noise.
@@ -711,7 +725,17 @@ void initSeasonalPaths() {
     );
 
 }
+// ==========================================
+// SD Web File Manager Helper Functions
+// ==========================================
 
+// Join directory + filename safely
+String buildPath(const String &baseDir, const String &fileName) {
+    if (baseDir.endsWith("/")) {
+        return baseDir + fileName;
+    }
+    return baseDir + "/" + fileName;
+}
 
 
 // BEGIN OTA SD Card File Operations
@@ -739,7 +763,9 @@ void downloadSDFile(AsyncWebServerRequest *request) {
         return;
     }
 
-    String filename = currentDirectory + request->getParam("filename")->value();
+    // NEW (correct, uses directory + "/" + filename):
+    String filename = buildPath(currentDirectory, request->getParam("filename")->value());
+
     if (!SD.exists(filename)) {
         request->send(404, "text/plain", "File not found");
         return;
@@ -754,7 +780,9 @@ void downloadSDFile(AsyncWebServerRequest *request) {
 
 void uploadSDFile(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
     static File uploadFile; // Keep track of the currently uploading file
-    String fullPath = currentDirectory + "/" + filename; // Respect the current directory
+
+    // Use buildPath instead of manual concat
+    String fullPath = buildPath(currentDirectory, filename);  // <--- THIS LINE ONLY CHANGE
 
     // Handle the start of the upload
     if (index == 0) {
@@ -787,7 +815,6 @@ void uploadSDFile(AsyncWebServerRequest *request, String filename, size_t index,
         }
     }
 }
-
 void changeDirectory(AsyncWebServerRequest *request) {
     if (!request->hasParam("dir")) {
         request->send(400, "text/plain", "Directory name is required");
@@ -796,7 +823,7 @@ void changeDirectory(AsyncWebServerRequest *request) {
 
     String newDirectory = request->getParam("dir")->value();
     if (newDirectory[0] != '/') {
-        newDirectory = currentDirectory + "/" + newDirectory;
+        newDirectory = buildPath(currentDirectory, newDirectory);
     }
 
     if (SD.exists(newDirectory) && SD.open(newDirectory).isDirectory()) {
@@ -814,7 +841,9 @@ void deleteSDFile(AsyncWebServerRequest *request) {
     }
 
     String fileName = request->getParam("filename")->value();
-    String fullPath = currentDirectory + "/" + fileName; // Respect the current directory
+
+    // Build path safely in the current directory
+    String fullPath = buildPath(currentDirectory, fileName);
 
     // Normalize the file path
     if (fullPath.startsWith("//")) {
@@ -2204,7 +2233,7 @@ void checkAndCreateFile(const String &fileName, const String &header = "") {
                 Serial.printf("Failed to create file %s\n", fileName.c_str());
             } else {
                 if (!header.isEmpty()) {
-                    file.print(header);
+                    file.println(header);
                 }
                 file.close();
                 Serial.printf("File %s created successfully\n", fileName.c_str());
