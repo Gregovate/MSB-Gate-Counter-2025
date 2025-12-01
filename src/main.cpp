@@ -326,8 +326,6 @@ char topicBase[60];
 #define MQTT_PUB_TIME           "msb/traffic/GateCounter/System/time"
 #define MQTT_DEBUG_LOG          "msb/traffic/GateCounter/System/debug"
 #define MQTT_PUB_HEARTBEAT      "msb/traffic/GateCounter/System/heartbeat"
-#define MQTT_PUB_ALARM          "msb/traffic/GateCounter/Alarm"
-
 
 /* Season metadata (shared SD/season logic) */
 #define MQTT_PUB_SEASON_FOLDER  "msb/traffic/GateCounter/System/seasonFolder"
@@ -362,6 +360,7 @@ char topicBase[60];
 #define MQTT_PUB_BEAM_B_BROKEN_MS "msb/traffic/GateCounter/Sensors/beamB_broken_ms"
 #define MQTT_PUB_TTP              "msb/traffic/GateCounter/Sensors/TTP"
 #define MQTT_COUNTER_LOG          "msb/traffic/GateCounter/Sensors/CounterLog"
+#define MQTT_PUB_ALARM            "msb/traffic/GateCounter/Sensors/Alarm"
 
 // ---------------- CONFIG (subscribed setpoints/toggles) ----------------
 #define MQTT_SUB_GATE_RESET_DAILY   "msb/traffic/GateCounter/Config/resetDailyCount"
@@ -2006,7 +2005,7 @@ void averageHourlyTemp() {
 }
 
 
-// Car Counted, increment the counter by 1 and append to the Exitlog.csv log file on the SD card
+// Exit Car Counted, increment the counter by 1 and append to the Exitlog.csv log file on the SD card
 void countTheCar() {
     DateTime now = rtc.now();
 
@@ -2051,7 +2050,7 @@ void countTheCar() {
     myFile = SD.open(fileName6, FILE_APPEND);
     if (myFile) {
         // DateTime
-        myFile.print(now.toString(buf2));
+        myFile.print(timeBuf);
         myFile.print(", ");
 
         // TimeToPass_ms (A broken -> B cleared)
@@ -2076,7 +2075,7 @@ void countTheCar() {
         myFile.close();
 
         // ---- Event-driven state publishes (NEW tree) ----
-        publishMQTT(MQTT_PUB_TIME, now.toString(buf2));  // time doesn't need retain
+        publishMQTT(MQTT_PUB_TIME, timeBuf);  // use the same timestamp string
 
         publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
         publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
@@ -2092,6 +2091,7 @@ void countTheCar() {
         Serial.println(fileName6);
     }
 }
+
 
 
 
