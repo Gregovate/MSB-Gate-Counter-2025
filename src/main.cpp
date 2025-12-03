@@ -9,10 +9,17 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.12.03.0"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.12.03.1"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.12.03.1   Added CarCounter-style idle beam-health monitoring:
+             - If Beam A or Beam B remains HIGH (broken) for >= gateCounterTimeout
+               while in WAITING_FOR_CAR, publish ALARM_GATE_STUCK (retained).
+             - Added debug entries: "Beam A stuck HIGH (idle)" and
+               "Beam B stuck HIGH (idle)".
+             - Alarm auto-clears when both beams return LOW in WAITING_FOR_CAR.
+             No changes to BEAM_A_HIGH, BOTH_BEAMS_HIGH, or CAR_DETECTED state logic.
 25.12.03.0   Hardened GateCounter alarm model for 2025 season:
              - Stuck-vehicle alarm in BOTH_BEAMS_HIGH is now properly latched:
                publishes "ALARM_GATE_STUCK" only once when gateCounterTimeout
@@ -2174,14 +2181,64 @@ void detectCar() {
 
     switch (gateDetectState) {
 
-        case WAITING_FOR_CAR:
+        case WAITING_FOR_CAR: {
+            unsigned long now = currentMillis;
+
+            // -----------------------------------------
+            // Idle Beam Health Check (no car in progress)
+            // If either beam stays HIGH for >= gateCounterTimeout while we are
+            // still WAITING_FOR_CAR, treat it as a sensor fault (snow, dead sensor, etc.).
+            // -----------------------------------------
+
+            // Beam A health
+            if (aBroken) {
+                if (firstBeamHealth_ms == 0) {
+                    firstBeamHealth_ms = now;  // start timing
+                } else if ((now - firstBeamHealth_ms) >= gateCounterTimeout && !gateStuckAlarmActive) {
+                    publishMQTT(MQTT_COUNTER_LOG, "Beam A stuck HIGH (idle)");
+                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", true);
+                    gateStuckAlarmActive = true;
+                }
+            } else {
+                // Beam A is clear
+                firstBeamHealth_ms = 0;
+            }
+
+            // Beam B health
+            if (bBroken) {
+                if (secondBeamHealth_ms == 0) {
+                    secondBeamHealth_ms = now;  // start timing
+                } else if ((now - secondBeamHealth_ms) >= gateCounterTimeout && !gateStuckAlarmActive) {
+                    publishMQTT(MQTT_COUNTER_LOG, "Beam B stuck HIGH (idle)");
+                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", true);
+                    gateStuckAlarmActive = true;
+                }
+            } else {
+                // Beam B is clear
+                secondBeamHealth_ms = 0;
+            }
+
+            // If BOTH beams are clear and we have an active alarm, clear it here.
+            // This covers idle sensor recovery cases without depending on car flow.
+            if (!aBroken && !bBroken && gateStuckAlarmActive) {
+                publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);
+                gateStuckAlarmActive = false;
+            }
+
+            // -----------------------------------------
+            // Normal entry into car detection
+            // -----------------------------------------
+
             // Start on Beam A broken while B is still clear
             if (aBroken && !bBroken) {
                 beamATripTime_ms = currentMillis;
-                gateDetectState = BEAM_A_HIGH;
+                gateDetectState  = BEAM_A_HIGH;
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A broken (event start).");
             }
+
             break;
+        }
+
 
         case BEAM_A_HIGH:
             // Beam B follows → validate minimum activation
