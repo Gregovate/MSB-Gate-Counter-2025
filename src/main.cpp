@@ -9,10 +9,23 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.12.03.1"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.12.03.2"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.12.03.3   GateCounter UI and SD file manager alignment with CarCounter 2025:
+             - Added visible "View Show Summary" button in index.html and applied
+               Gate theme styling so the element renders correctly on the lighter
+               Gate UI background.
+             - Updated GateCounter CSS for .btn elements (blue background, white text,
+               proper hover transitions) to ensure consistent appearance across UI.
+             - Confirmed showSummary.html integration and CSV viewer loading through
+               /ShowSummary.csv with appropriate error handling.
+             - Added HTTP /delete and /rename routes using the unified buildPath()
+               helper so SD file operations behave identically to CarCounter 2025.
+             - Both routes honor currentDirectory and return proper HTTP status codes
+               for invalid parameters, missing files, and SD unavailability.
+             - No changes to car-detection logic, MQTT topics, or timing behavior.
 25.12.03.1   Added CarCounter-style idle beam-health monitoring:
              - If Beam A or Beam B remains HIGH (broken) for >= gateCounterTimeout
                while in WAITING_FOR_CAR, publish ALARM_GATE_STUCK (retained).
@@ -774,22 +787,56 @@ String buildPath(const String &baseDir, const String &fileName) {
 
 // BEGIN OTA SD Card File Operations
 void listSDFiles(AsyncWebServerRequest *request) {
+
+    // Header line so the UI output is self-explanatory
     String fileList = "Files in " + currentDirectory + ":\n";
+    fileList += "Name\tSize (bytes)\tLast Write\n";
 
     File root = SD.open(currentDirectory);
     if (!root || !root.isDirectory()) {
-        request->send(500, "text/plain", "Failed to open directory");
+        request->send(500, "text/plain", "Failed to open directory: " + currentDirectory);
         return;
     }
 
-    File file = root.openNextFile();
-    while (file) {
-        fileList += String(file.name()) + " (" + String(file.size()) + " bytes)\n";
-        file = root.openNextFile();
+    while (true) {
+        File file = root.openNextFile();
+        if (!file) {
+            break;  // no more files
+        }
+
+        if (!file.isDirectory()) {
+            // Name
+            fileList += String(file.name());
+            fileList += "\t";
+
+            // Size
+            fileList += String(file.size());
+            fileList += "\t";
+
+            // Last write time (if available and time is set)
+            time_t lw = file.getLastWrite();  // ESP32 SD library usually supports this
+            if (lw > 0) {
+                struct tm *tmstruct = localtime(&lw);
+                char buf[20];
+                // YYYY-MM-DD HH:MM
+                strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", tmstruct);
+                fileList += buf;
+            } else {
+                fileList += "unknown";
+            }
+
+            fileList += "\n";
+        }
+
+        file.close();  // important: close each file before opening the next
     }
+
+    root.close();
 
     request->send(200, "text/plain", fileList);
 }
+
+
 
 void downloadSDFile(AsyncWebServerRequest *request) {
     if (!request->hasParam("filename")) {
@@ -855,17 +902,43 @@ void changeDirectory(AsyncWebServerRequest *request) {
         return;
     }
 
-    String newDirectory = request->getParam("dir")->value();
-    if (newDirectory[0] != '/') {
-        newDirectory = buildPath(currentDirectory, newDirectory);
+    String dir = request->getParam("dir")->value();
+    String target;
+
+    // Case 1: absolute path (starts with "/")
+    if (dir.startsWith("/")) {
+        target = dir;
+    }
+    // Case 2: contains a "/" but no leading slash → treat as root-based
+    // e.g. "gc/2025" -> "/gc/2025"
+    else if (dir.indexOf('/') != -1) {
+        target = "/" + dir;
+    }
+    // Case 3: simple name (no "/") → treat as relative to currentDirectory
+    else {
+        target = buildPath(currentDirectory, dir);
     }
 
-    if (SD.exists(newDirectory) && SD.open(newDirectory).isDirectory()) {
-        currentDirectory = newDirectory;
-        request->send(200, "text/plain", "Changed directory to " + currentDirectory);
-    } else {
-        request->send(404, "text/plain", "Directory not found");
+    // Normalize accidental leading "//"
+    if (target.startsWith("//")) {
+        target = target.substring(1);
     }
+
+    // Must exist AND be a directory
+    if (SD.exists(target)) {
+        File f = SD.open(target);
+        if (f && f.isDirectory()) {
+            f.close();
+            currentDirectory = target;
+            request->send(200, "text/plain", "Changed directory to " + currentDirectory);
+            return;
+        }
+        if (f) {
+            f.close();
+        }
+    }
+
+    request->send(404, "text/plain", "Directory not found: " + target);
 }
 
 void deleteSDFile(AsyncWebServerRequest *request) {
@@ -897,9 +970,50 @@ void deleteSDFile(AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "File not found: " + fullPath);
     }
 }
+
+void renameSDFile(AsyncWebServerRequest *request) {
+
+    if (!request->hasParam("old") || !request->hasParam("new")) {
+        request->send(400, "text/plain", "Parameters 'old' and 'new' are required");
+        return;
+    }
+
+    String oldName = request->getParam("old")->value();
+    String newName = request->getParam("new")->value();
+
+    // Build full paths relative to currentDirectory
+    String oldPath = buildPath(currentDirectory, oldName);
+    String newPath = buildPath(currentDirectory, newName);
+
+    // Normalize accidental leading //
+    if (oldPath.startsWith("//"))  oldPath = oldPath.substring(1);
+    if (newPath.startsWith("//")) newPath = newPath.substring(1);
+
+    // Make sure source exists
+    if (!SD.exists(oldPath)) {
+        request->send(404, "text/plain", "Source file not found: " + oldPath);
+        return;
+    }
+
+    // Be conservative: refuse to overwrite an existing target
+    if (SD.exists(newPath)) {
+        request->send(409, "text/plain", "Target already exists: " + newPath);
+        return;
+    }
+
+    if (SD.rename(oldPath, newPath)) {
+        Serial.printf("File renamed: %s -> %s\n", oldPath.c_str(), newPath.c_str());
+        request->send(200, "text/plain",
+                      "File renamed: " + oldPath + " -> " + newPath);
+    } else {
+        Serial.printf("Failed to rename: %s -> %s\n", oldPath.c_str(), newPath.c_str());
+        request->send(500, "text/plain",
+                      "Failed to rename: " + oldPath + " -> " + newPath);
+    }
+}
 //END OTA SD Card File Operations
 
-// HTML Content now served from /data/index.html and /data/style.css
+// Gate Counter HTML Content now served from /data/index.html and /data/style.css
 void setupServer() {
     // Serve HTML file
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -921,7 +1035,9 @@ void setupServer() {
         ESP.restart();
     });    
 
-    // Serve CSS file
+    // ----------------------------
+    // Serve CSS (fallback = 404)
+    // ----------------------------
     server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (!SD.exists("/data/style.css")) {
             request->send(500, "text/plain", "style.css not found in /data");
@@ -930,23 +1046,90 @@ void setupServer() {
         request->send(SD, "/data/style.css", "text/css");
     });
 
-    // Setup Web Server Routes
+    // ----------------------------
+    // Serve Show Summary webpage
+    // Put showSummary.html in /data/
+    // ----------------------------
+    server.on("/showSummary.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+
+        if (SD.exists("/data/showSummary.html")) {
+            request->send(SD, "/data/showSummary.html", "text/html");
+            return;
+        }
+
+        request->send(404, "text/plain", "showSummary.html not found in /data");
+    });
+
+    // ----------------------------
+    // Seasonal ShowSummary.csv
+    // /GC/YYYY/ShowSummary.csv  (seasonFolder should already be /GC/YYYY)
+    // ----------------------------
+    server.on("/ShowSummary.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
+
+        String fullPath = String(seasonFolder) + "/ShowSummary.csv";
+
+        if (!SD.exists(fullPath)) {
+            request->send(404, "text/plain",
+                          "ShowSummary.csv not found in season folder");
+            return;
+        }
+
+        AsyncWebServerResponse *response =
+            request->beginResponse(SD, fullPath, "text/csv");
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+    });
+
+    // ----------------------------
+    // File manager / SD routes
+    // ----------------------------
     server.on("/listFiles", HTTP_GET, listSDFiles);
     server.on("/download", HTTP_GET, downloadSDFile);
-    server.on("/upload", HTTP_POST, 
+
+    // Simple upload page for /uploadToData (so browser GET doesn't 500)
+    server.on("/uploadToData", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html",
+            "<!doctype html><html><body>"
+            "<h3>Upload UI files to /data</h3>"
+            "<form method='POST' action='/uploadToData' enctype='multipart/form-data'>"
+            "<input type='file' name='file' multiple>"
+            "<input type='submit' value='Upload to /data'>"
+            "</form>"
+            "<p>After upload, go back to <a href='/'>home</a>.</p>"
+            "</body></html>"
+        );
+    });
+
+    // Handle file uploads to currentDirectory (CarCounter-aligned)
+    server.on("/upload", HTTP_POST,
         [](AsyncWebServerRequest *request) {},
         uploadSDFile);
-    // Handle file uploads to /data directory
-    server.on("/uploadToData", HTTP_POST, 
+
+    // ----------------------------
+    // Handle file uploads to /data directory (CarCounter-aligned, no sdAvailable)
+    // ----------------------------
+    server.on("/uploadToData", HTTP_POST,
         [](AsyncWebServerRequest *request) {},
-        [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+        [](AsyncWebServerRequest *request,
+        String filename,
+        size_t index,
+        uint8_t *data,
+        size_t len,
+        bool final) {
+
+            // Guarantee /data exists (same behavior as Car Counter)
+            if (!SD.exists("/data")) {
+                SD.mkdir("/data");
+            }
+
             String fullPath = "/data/" + filename;
             static File uploadFile;
 
-            if (index == 0) { // First chunk
+            if (index == 0) {  // First chunk
                 if (SD.exists(fullPath)) {
                     SD.remove(fullPath);
                 }
+
                 uploadFile = SD.open(fullPath, FILE_WRITE);
                 if (!uploadFile) {
                     request->send(500, "text/plain", "Failed to open file for writing");
@@ -954,27 +1137,36 @@ void setupServer() {
                 }
             }
 
-            if (uploadFile) { // Write the data
+            if (uploadFile) {
                 uploadFile.write(data, len);
             }
 
-            if (final) { // Final chunk
+            if (final) {  // Final chunk
                 if (uploadFile) {
                     uploadFile.close();
                 }
-                request->send(200, "text/plain", "File uploaded successfully to /data");
+                request->send(200, "text/plain",
+                            "File uploaded successfully to /data");
             }
         });
-    
-    server.on("/changeDirectory", HTTP_GET, changeDirectory);
-    server.on("/ShowSummary.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
-        AsyncWebServerResponse *response = request->beginResponse(SD, "/ShowSummary.csv", "text/csv");
-        response->addHeader("Access-Control-Allow-Origin", "*");
-        request->send(response);
-    });
 
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/plain", "Hi! This is The Car Counter.");
+    // ----------------------------
+    // Identity endpoint (Changing Directory)
+    // ----------------------------
+    server.on("/changeDirectory", HTTP_GET, changeDirectory);
+
+    // ----------------------------
+    // NEW: delete and rename 25-12-01 GAL
+    // ----------------------------
+    server.on("/delete", HTTP_ANY, deleteSDFile);
+    server.on("/rename", HTTP_ANY, renameSDFile);
+
+    // ----------------------------
+    // Identity endpoint (for UI theming) 25-12-01 GAL
+    // ----------------------------
+    server.on("/identity", HTTP_GET, [](AsyncWebServerRequest *request) {
+        // THIS_MQTT_CLIENT is already "CarCounter" or "GateCounter"
+        request->send(200, "text/plain", THIS_MQTT_CLIENT);
     });
 
     // Elegant OTA
