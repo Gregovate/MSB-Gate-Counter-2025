@@ -9,10 +9,24 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.11.30.2"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.12.03.0"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.12.03.0   Hardened GateCounter alarm model for 2025 season:
+             - Stuck-vehicle alarm in BOTH_BEAMS_HIGH is now properly latched:
+               publishes "ALARM_GATE_STUCK" only once when gateCounterTimeout
+               is exceeded (guarded by !gateStuckAlarmActive).
+             - All ALARM and CLEAR publishes are now retained to ensure Home
+               Assistant always receives the current alarm state after reconnect.
+             - Added boot-time retained CLEAR publish immediately after
+               MQTTreconnect() so HA never starts in an undefined alarm state.
+             - Updated CLEAR behavior in BOTH_BEAMS_HIGH to use retained publish
+               and reset the latch cleanly.
+             - No changes made to the detection state machine logic (WAITING_FOR_CAR,
+               BEAM_A_HIGH, BOTH_BEAMS_HIGH, CAR_DETECTED) beyond alarm handling.
+             - No beam-health timers or FIRST_BEAM stuck logic added yet; these
+               will be implemented in upcoming versions.
 25.11.30.2   Replaced rtc.toString(buf2) with explicit timestamp formatting in
              countTheCar() to fix frozen timestamps in ExitLog.csv and MQTT
              time publish. Now uses a local timeBuf built with snprintf so each
@@ -399,13 +413,16 @@ enum GateDetectState {
 GateDetectState gateDetectState = WAITING_FOR_CAR;
 
 // Timing / flags
-unsigned long beamATripTime_ms = 0;        // when Beam A first broke
-unsigned long bothBeamsBroken_ms = 0;      // when both beams confirmed broken
-unsigned long lastCarDetected_ms = 0;      // for betweenCars
+unsigned long beamATripTime_ms = 0;         // when Beam A first broke
+unsigned long bothBeamsBroken_ms = 0;       // when both beams confirmed broken
+unsigned long lastCarDetected_ms = 0;       // when last car was detected
+unsigned long firstBeamHealth_ms  = 0;      // for Beam A
+unsigned long secondBeamHealth_ms = 0;      // for Beam B
+unsigned long timeBetweenCars_ms = 0;       // time between cars for ExitLog.csv
 bool carPresentFlag = false;
 static bool gateStuckAlarmActive = false;
-unsigned long abFollow_ms = 0;            // A to B follow time
-unsigned long timeToPassMS = 0;          // Time from start of detection to confirmation
+unsigned long abFollow_ms = 0;              // A to B follow time
+unsigned long timeToPassMS = 0;             // Time from start of detection to confirmation
 
 // Filters / windows (match your proven behavior)
 const unsigned long minActivationDuration = 150; // ignore tiny blips
@@ -2200,9 +2217,11 @@ void detectCar() {
         case BOTH_BEAMS_HIGH:
             // Stuck-vehicle alarm (uses your existing timeout)
             if ((currentMillis - beamATripTime_ms) >= gateCounterTimeout) {
-                publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", false);
-                publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
-                gateStuckAlarmActive = true;   // latch so we don't spam
+                if (!gateStuckAlarmActive) {
+                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", true);   // RETAINED
+                    publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
+                    gateStuckAlarmActive = true;   // latch so we don't spam
+                }
             }
 
             // When Beam B clears, validate duration and move to count
@@ -2227,11 +2246,12 @@ void detectCar() {
 
                 // Beam B just cleared → if we had a stuck alarm, clear it now
                 if (gateStuckAlarmActive) {
-                    publishMQTT(MQTT_PUB_ALARM, "CLEAR", false);
+                    publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);  // RETAINED
                     gateStuckAlarmActive = false;
                 }
             }
             break;
+
 
         case CAR_DETECTED:
             if (carPresentFlag) {
@@ -2660,6 +2680,14 @@ void setup() {
   
     // MQTT Reconnection with login credentials
     MQTTreconnect(); // Ensure MQTT is connected
+
+    // After MQTT connect on Gate Counter: ensure alarm state is CLEAR and retained
+    publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);
+    gateStuckAlarmActive = false;
+
+    // (Optional / existing) publish initial beam states as retained
+    publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
+    publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
 
     // Both beams via optocouplers: HIGH = clear, LOW = broken 25-11-20 GAL
     pinMode(magSensorPin, INPUT);      // Beam A
