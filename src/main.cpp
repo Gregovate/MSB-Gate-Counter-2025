@@ -9,13 +9,14 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.12.03.2"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.12.05.0"   // Firmware Version feature/dual-beam-gate
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.12.05.0   Removed beamA trip time and replaced with timeBetweenCars_ms in ExitLog.csv
 25.12.03.3   GateCounter UI and SD file manager alignment with CarCounter 2025:
              - Added visible "View Show Summary" button in index.html and applied
-               Gate theme styling so the element renders correctly on the lighter
+               Gate theme styling so the element renders correctly on te lighter
                Gate UI background.
              - Updated GateCounter CSS for .btn elements (blue background, white text,
                proper hover transitions) to ensure consistent appearance across UI.
@@ -118,7 +119,7 @@ DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
             - Added Beam B broken-duration timing:
                 Sensors/beamB_broken_ms
             - Updated dual-beam state machine logic for parity with CarCounter
-            - Unified timeToPass (TTP) and timeBetweenCars telemetry
+            - Unified timeToPass (TTP) and timeBetweenCars_ms telemetry
 25.11.24.2  Added separate keep-alive timer in KeepMqttAlive() to publish
              select MQTT state values every 30 seconds if no cars are counted,
              ensuring remote dashboards stay updated during low traffic periods.
@@ -2285,8 +2286,8 @@ void countTheCar() {
         myFile.print(abFollow_ms);
         myFile.print(", ");
 
-        // BeamA_Trip_ms (raw millis when A tripped)
-        myFile.println(beamATripTime_ms);
+        // TimeBetweenCars_ms This car to previous car
+        myFile.println(timeBetweenCars_ms);
 
         myFile.close();
 
@@ -2431,7 +2432,6 @@ void detectCar() {
             break;
         }
 
-
         case BEAM_A_HIGH:
             // Beam B follows → validate minimum activation
             if (bBroken) {
@@ -2501,7 +2501,6 @@ void detectCar() {
             }
             break;
 
-
         case CAR_DETECTED:
             if (carPresentFlag) {
                 // TTP from Beam A broken to Beam B clear
@@ -2513,8 +2512,8 @@ void detectCar() {
 
                 // Between cars
                 if (lastCarDetected_ms > 0) {
-                    unsigned long timeBetweenCars = currentMillis - lastCarDetected_ms;
-                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars), true);
+                    timeBetweenCars_ms = currentMillis - lastCarDetected_ms;
+                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars_ms), true);
                 }
                 lastCarDetected_ms = currentMillis;
 
@@ -3003,7 +3002,7 @@ void setup() {
     checkAndCreateFile(fileName3);
     checkAndCreateFile(fileName4);
     //checkAndCreateFile(fileName5, "Date,Hour-17,Hour-18,Hour-19,Hour-20,Hour-21,Total,Temp");
-    checkAndCreateFile(fileName6, "DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, BeamA_Trip_ms");
+    checkAndCreateFile(fileName6, "DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, timeBetweenCars_ms");
     checkAndCreateFile(fileName7, "Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
     checkAndCreateFile(fileName8);
     checkAndCreateFile(fileName9);
