@@ -9,10 +9,13 @@ Uses an Optocoupler to read buried vehicle sensor for Ghost Controls Gate operat
 DOIT DevKit V1 ESP32 with built-in WiFi & Bluetooth
 */
 #define OTA_Title "Gate Counter" // OTA Title
-#define FWVersion "25.12.05.0"   // Firmware Version feature/dual-beam-gate
+#define FWVersion "25.12.28.0"   // Remove A->B timeout reset (diagnostic only) to prevent undercount during congestion/platooning
 #define THIS_MQTT_CLIENT "espGateCounter" // This MQTT Client Name
 
 /*  ## BEGIN CHANGELOG GATE COUNTER ##
+25.12.28.0  - Critical: Removed A->B timeout as a hard reset in BEAM_A_HIGH. Timeout is now diagnostic-only (logs once per event).
+                Purpose: prevent undercount on high-volume nights where congestion/platooning delays Beam B.
+            - Added per-event reset of abTimeoutLogged at event start and on BEAM_A_HIGH exit paths (prevents log carryover/spam).
 25.12.05.0   Removed beamA trip time and replaced with timeBetweenCars_ms in ExitLog.csv
 25.12.03.3   GateCounter UI and SD file manager alignment with CarCounter 2025:
              - Added visible "View Show Summary" button in index.html and applied
@@ -444,7 +447,9 @@ bool carPresentFlag = false;
 static bool gateStuckAlarmActive = false;
 unsigned long abFollow_ms = 0;              // A to B follow time
 unsigned long timeToPassMS = 0;             // Time from start of detection to confirmation
-
+// Busy nights + platooning can make A->B slow, and we can't throw away real cars.
+// Log once per event so we can quantify how often this happens.
+static bool abTimeoutLogged = false;
 // Filters / windows (match your proven behavior)
 const unsigned long minActivationDuration = 150; // ignore tiny blips
 const unsigned long maxABFollow_ms = 900;    
@@ -2379,8 +2384,6 @@ void detectCar() {
 
             // -----------------------------------------
             // Idle Beam Health Check (no car in progress)
-            // If either beam stays HIGH for >= gateCounterTimeout while we are
-            // still WAITING_FOR_CAR, treat it as a sensor fault (snow, dead sensor, etc.).
             // -----------------------------------------
 
             // Beam A health
@@ -2393,7 +2396,6 @@ void detectCar() {
                     gateStuckAlarmActive = true;
                 }
             } else {
-                // Beam A is clear
                 firstBeamHealth_ms = 0;
             }
 
@@ -2407,12 +2409,10 @@ void detectCar() {
                     gateStuckAlarmActive = true;
                 }
             } else {
-                // Beam B is clear
                 secondBeamHealth_ms = 0;
             }
 
-            // If BOTH beams are clear and we have an active alarm, clear it here.
-            // This covers idle sensor recovery cases without depending on car flow.
+            // Clear stuck alarm when both beams recover in idle
             if (!aBroken && !bBroken && gateStuckAlarmActive) {
                 publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);
                 gateStuckAlarmActive = false;
@@ -2421,11 +2421,14 @@ void detectCar() {
             // -----------------------------------------
             // Normal entry into car detection
             // -----------------------------------------
-
             // Start on Beam A broken while B is still clear
             if (aBroken && !bBroken) {
                 beamATripTime_ms = currentMillis;
                 gateDetectState  = BEAM_A_HIGH;
+
+                // NEW: reset one-shot timeout log at event start (per-event determinism)
+                abTimeoutLogged = false;
+
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A broken (event start).");
             }
 
@@ -2447,29 +2450,43 @@ void detectCar() {
                     bothBeamsBroken_ms = currentMillis;
                     carPresentFlag = true;
                     gateDetectState = BOTH_BEAMS_HIGH;
+
+                    // Leaving BEAM_A_HIGH via success path → reset log flag
+                    abTimeoutLogged = false;
+
                     publishMQTT(MQTT_COUNTER_LOG, "State changed: Both beams High.");
                 }
             }
             // If A clears before B breaks → reset
             else if (!aBroken) {
                 gateDetectState = WAITING_FOR_CAR;
+
+                // Leaving BEAM_A_HIGH via reset path → reset log flag
+                abTimeoutLogged = false;
+
                 publishMQTT(MQTT_COUNTER_LOG, "Beam A cleared before Beam B. Reset.");
             }
 
-            // If B never follows within 900 ms → reset (your proven rule)
+            // If B never follows within maxABFollow_ms → DIAGNOSTIC ONLY (do NOT reset)
             if (!bBroken && (currentMillis - beamATripTime_ms > maxABFollow_ms)) {
-                gateDetectState = WAITING_FOR_CAR;
-                publishMQTT(MQTT_COUNTER_LOG, "Beam A timeout (no Beam B within 750 ms). Reset.");
+                if (!abTimeoutLogged) {
+                    publishMQTT(
+                        MQTT_COUNTER_LOG,
+                        "Beam A->B follow exceeded maxABFollow_ms (NO RESET). Continuing to wait for Beam B."
+                    );
+                    abTimeoutLogged = true;
+                }
             }
+
             break;
 
         case BOTH_BEAMS_HIGH:
-            // Stuck-vehicle alarm (uses your existing timeout)
+            // Stuck-vehicle alarm
             if ((currentMillis - beamATripTime_ms) >= gateCounterTimeout) {
                 if (!gateStuckAlarmActive) {
-                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", true);   // RETAINED
+                    publishMQTT(MQTT_PUB_ALARM, "ALARM_GATE_STUCK", true);
                     publishMQTT(MQTT_COUNTER_LOG, "Sensor blocked", false);
-                    gateStuckAlarmActive = true;   // latch so we don't spam
+                    gateStuckAlarmActive = true;
                 }
             }
 
@@ -2487,15 +2504,14 @@ void detectCar() {
                     gateDetectState = CAR_DETECTED;
                     publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
                 } else {
-                    // Not a car → reset
                     carPresentFlag = false;
                     gateDetectState = WAITING_FOR_CAR;
                     publishMQTT(MQTT_COUNTER_LOG, "No car detected (duration too short).");
                 }
 
-                // Beam B just cleared → if we had a stuck alarm, clear it now
+                // Clear stuck alarm when event ends
                 if (gateStuckAlarmActive) {
-                    publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);  // RETAINED
+                    publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);
                     gateStuckAlarmActive = false;
                 }
             }
@@ -2525,6 +2541,7 @@ void detectCar() {
     }
 }
 // END GATE CAR DETECTION
+
 
 
 
