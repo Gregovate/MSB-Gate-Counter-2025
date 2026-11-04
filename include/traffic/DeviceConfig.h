@@ -2,7 +2,7 @@
 
 // Device-specific identity, GPIOs and display geometry. No wiring changes in this extraction.
 #define OTA_Title "Gate Counter"
-#define FWVersion "25.12.28.0-modular-test.1"
+#include "FirmwareVersion.h" // Version is edited at the top of src/main.cpp.
 #define THIS_MQTT_CLIENT "espGateCounter"
 #define magSensorPin 32 // Legacy name: Beam A in production dual-beam firmware
 #define beamSensorPin 33
