@@ -1,5 +1,41 @@
 {
+    // Keep your original associations
     "files.associations": {
         "bitset": "cpp"
-    }
+    },
+
+    // -------------------------------
+    // Visual differentiation (Gate Counter = BLUE)
+    // -------------------------------
+    "workbench.colorCustomizations": {
+        "titleBar.activeBackground": "#003a70",        // dark blue (MSB blue)
+        "titleBar.inactiveBackground": "#00284d",
+        "titleBar.activeForeground": "#ffffff",
+
+        "statusBar.background": "#003a70",
+        "statusBar.noFolderBackground": "#003a70",
+        "statusBar.foreground": "#ffffff",
+
+        "activityBar.background": "#00284d",
+        "activityBar.foreground": "#ffffff",
+        "activityBar.inactiveForeground": "#88aadd",
+
+        "sideBar.background": "#0a0f1a"
+    },
+
+    // -------------------------------
+    // Window title to avoid mix-ups
+    // -------------------------------
+    "window.title": "📟 GATE COUNTER — ${rootName}${separator}${activeEditorShort}",
+
+    // -------------------------------
+    // Hide PlatformIO/VSCode junk
+    // -------------------------------
+    "files.exclude": {
+        "**/.pio": true,
+        "**/.vscode/ipch": true
+    },
+
+    // Optional: if you install Peacock, keep color consistent
+    "peacock.color": "#003a70"
 }
