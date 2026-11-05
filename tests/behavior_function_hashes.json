@@ -1,9 +1,9 @@
 {
-  "KeepMqttAlive": "3c8eb24708cbe94c2ac43efe8d6213a3b36e24c7c9aff7df52ef8070ef149e14",
+  "KeepMqttAlive": "5a10f48c3e0f417d0e188d6ab1d7d05847fa4927205c39176576fba2f71dc1a8",
   "SetLocalTime": "f2e9662d99e9af93794fdff67ac400016085c762f0b6c09f4da749287a9e888c",
   "acceptShowStartDate": "68e628189079b5766713940aa60905ae4063b733c988fec858afea7b631fea11",
   "applyRecordingCalendar": "83e09e16d46d1dcd28a2acfe795b7ca95a89d13b0a854da854b16f83eb25065c",
-  "callback": "962cc268c6e89382b8421dd6a732596f6e44f9f776a4b0a0df57fd0a1fb523c3",
+  "callback": "1ce36864593988ccdece47bd49ebf5a1dac24a30dbd938162965231644cc5ebb",
   "changeDirectory": "3ff8dda64db024144b6ba0b74c1e8feb62a37747261af7aa615d056ad6ab104a",
   "checkAndCreateFile": "1d78b804c083dd14b3a859c3a68c73ab51dff49a861b466671206717b4f7b040",
   "computeDaysRunningFromStart": "7aa2f24e914cb1c593282ac2a782e81d0d3b6a9af6f4a783522f3ae736008f7f",
@@ -67,5 +67,7 @@
   "resetCountsForShow": "a4460f5d419dcc035f0118c65999fcca5a6bdc5acad4a5796969108782ed6711",
   "recoverHourlyExport": "9454008c3180aa2f9d3e7f8861e7b4a00b7dc489a717ff6959a844463c5e8275",
   "writeHourlyExport": "3f2922b2ec57c7004ecbb6024afcf2b43dac3973d74bf5e958bb8b5937a7f289",
-  "reportHourlyExportStatus": "bde61168fa54b8af2f917dbe58270549af1afb4ea2821a0683f8b7746dccc917"
+  "reportHourlyExportStatus": "bde61168fa54b8af2f917dbe58270549af1afb4ea2821a0683f8b7746dccc917",
+  "publishTimingConfig": "3ea2b5b3c827287c3e2d939e332cfead1c855de1b62db40bd5ce86c8d7e03cec",
+  "publishConfigState": "f010da7d17de54b632d8c3aec729650f49806f3b14c1bbb7133849450567c682"
 }

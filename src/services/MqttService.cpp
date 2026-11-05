@@ -30,6 +30,7 @@ void publishMQTT(const char *topic, const String &message) {
 
 
 void KeepMqttAlive() {
+    publishTimingConfig();
     publishCountHealth();
     publishRecordingCalendar();
 
@@ -105,11 +106,9 @@ void publishStateExitInPark() {
 }
 
 void publishTimingConfig() {
-  // These use the same topics you subscribe to:
-  //   msb/traffic/GateCounter/Config/gateCounterTimeout
-  //   msb/traffic/GateCounter/Config/carDetectMS
-  publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
-  publishMQTT(MQTT_SUB_CARMS,        String(carDetectMS),        true);
+    // Commands remain HA-owned; expose the actual applied values separately.
+    publishConfigState(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout));
+    publishConfigState(MQTT_SUB_CARMS, String(carDetectMS));
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -216,6 +215,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
 
     publishDebugLog("Gate Counter Timeout Updated");
+    publishTimingConfig();
     return;
   }
 
@@ -228,6 +228,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     // publishMQTT(MQTT_SUB_CARMS, String(carDetectMS), true);
 
     publishDebugLog("Gate Counter carDetectMS Updated");
+    publishTimingConfig();
     return;
   }
 
