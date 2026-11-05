@@ -1,5 +1,5 @@
 {
-  "KeepMqttAlive": "5a10f48c3e0f417d0e188d6ab1d7d05847fa4927205c39176576fba2f71dc1a8",
+  "KeepMqttAlive": "4118b86a0c051b03560f580b9b2c774ace410b33932705db3683edf15d0fcce7",
   "SetLocalTime": "f2e9662d99e9af93794fdff67ac400016085c762f0b6c09f4da749287a9e888c",
   "acceptShowStartDate": "68e628189079b5766713940aa60905ae4063b733c988fec858afea7b631fea11",
   "applyRecordingCalendar": "83e09e16d46d1dcd28a2acfe795b7ca95a89d13b0a854da854b16f83eb25065c",
@@ -7,7 +7,7 @@
   "changeDirectory": "3ff8dda64db024144b6ba0b74c1e8feb62a37747261af7aa615d056ad6ab104a",
   "checkAndCreateFile": "1d78b804c083dd14b3a859c3a68c73ab51dff49a861b466671206717b4f7b040",
   "computeDaysRunningFromStart": "7aa2f24e914cb1c593282ac2a782e81d0d3b6a9af6f4a783522f3ae736008f7f",
-  "countTheCar": "021c81b18232477d03d6d64683cdf8349a11f3974d8f86dca72d6cf2c8b11004",
+  "countTheCar": "17ecb77c574790eeced8263ebec565f36733f8a32b05bb617e4c404278338b5b",
   "createAndInitializeHourlyFile": "ebf1d9496eb664c05998e87b5bb32e2b5bb34b7658b2046374e5ab69b552bbdf",
   "deleteSDFile": "a315b9dd11e8a2efe835e7ed47354c54251528e8fb303b02d1c10f0844b4de1a",
   "determineSeasonYear": "b581bef342522b7e555cdfb79d52fe7389faf8841c7e63447b5a21ee0c97beea",
@@ -15,7 +15,7 @@
   "getDailyTotal": "a5272fde267faa987f2c2eca2b2e728d4a64b1f90c42612583b992ac8efef340",
   "getDayOfMonth": "09dacf7d3a451c5c7a39cc620ce48ad2f5a2eee234debe2e2b9fa30edd17fafb",
   "getDaysRunning": "ac24ade12a3a6f7fc94380853fcf2af4113b152ca88016c9faa9b843637bafc1",
-  "getHourlyData": "e52764e1db2dc477e9b3c2389d53074bfe05668b0e8a1102cc7769dafb4ea1de",
+  "getHourlyData": "4955bc3f3be49d1dba6ae3d3f1e5eaeb4f64a4caa18fbf1dcb398208748c159a",
   "getShowStartDate": "ff46e36e084b6fee244940255973b0d0e9a61bce46088850c594ecb8693bd743",
   "getShowTotal": "22945ac77cee4e1a13a31bd7764c4175aa364ad204720382809de6fb59cdddd4",
   "initSDCard": "13b382a3a651c455b9c4dbf1f1f1c186c4691f65801429ac12f61543c5edb3e3",
@@ -23,7 +23,7 @@
   "listSDFiles": "0283df2645c8c3f0f2e314c35dd9b0ec1e26e459b76f042e45cd8c6fb272faf9",
   "loadRecordingCalendarFromSD": "f2f494ba8b1f7e91cc4e415b347e8cc872a1607f91c309265c2258eea06e87f6",
   "logSensorStates": "6e2f2d75fd5adb37a4a8d2218c15984cf73143f64ec04b846c2721416efe4c30",
-  "loop": "fbbc4f4a27d942befd0c74e750f1c296e1a1ce5d040ff7f53b12dd4154d81b3a",
+  "loop": "99017201ef915abed60ac9f53071ed6661b19fe23bf0e51c0809c681c0497237",
   "noteNetworkClock": "9746c106dbf97c3eaff080c3de054f0bacb12e15dcf41cb99f1fadd3d8b71e11",
   "persistCalendar": "7ca95413e27b05b1f7e6311f6c122c3c6b4f8c895ec6d1727249a6c1b057fadc",
   "publishRecordingCalendar": "73bf8a9009c596362de21e50c3c4ec728f5dc892446f53fbfbfa105622f35116",
@@ -40,7 +40,7 @@
   "saveDailyTotal": "b72a39ff63a60986dbecda8a94476dd3e974114082352fde19c2dcc041f15bda",
   "saveDayOfMonth": "5a0f988bfafb79cf2e66007b76af57db621b5ac42bfc95654f5fdd8d191c772e",
   "saveDaysRunning": "b27b26905ff207dedb8c2ee52528d9f41c6daa6c411c1ac8171a70c0d56e3b92",
-  "saveHourlyCounts": "dc1ad0866cab9d224f66975aa7870044f747e1c69c0bdbe1f7aab28cb71b506f",
+  "saveHourlyCounts": "38aa2bfd04d2598b8ee0a53043b52680181499d1f1fde04778e491ed26f79e33",
   "saveShowStartDate": "5cdcecc3f4dd8778d199cc031196d7e501580b3589a29f70ef8ff9f702cc0377",
   "saveShowTotal": "c25bbf8426a7aa1acdc64d8ad81b6cda40a9b561bb9e8e545813051120873b84",
   "setup": "c123f3b1655e416c9b928b1227543699f0ab1f099cc7b5499d456ec732200e4e",
@@ -69,5 +69,6 @@
   "writeHourlyExport": "3f2922b2ec57c7004ecbb6024afcf2b43dac3973d74bf5e958bb8b5937a7f289",
   "reportHourlyExportStatus": "bde61168fa54b8af2f917dbe58270549af1afb4ea2821a0683f8b7746dccc917",
   "publishTimingConfig": "3ea2b5b3c827287c3e2d939e332cfead1c855de1b62db40bd5ce86c8d7e03cec",
-  "publishConfigState": "f010da7d17de54b632d8c3aec729650f49806f3b14c1bbb7133849450567c682"
+  "publishConfigState": "f010da7d17de54b632d8c3aec729650f49806f3b14c1bbb7133849450567c682",
+  "publishHourlySnapshot": "b67af465dd67d78e9b33841fc7689e5e6ea5746d6c801fcf5490acf5dd09f935"
 }

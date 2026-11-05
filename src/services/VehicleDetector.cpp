@@ -53,10 +53,10 @@ void countTheCar() {
 
 
     // Publish current hour's data to MQTT (NEW tree)
-    // Final form: msb/traffic/GateCounter/Cars/Hourly/07
+    // Final form: msb/traffic/GateCounter/Cars/hour/07
     char hourlyTopic[120];  // GAL 25-11-24: expanded for new bucketed paths
     snprintf(hourlyTopic, sizeof(hourlyTopic),
-             "%s/%02d", MQTT_PUB_CARS_HOURLY, currentHour);
+             "%s%02d", MQTT_PUB_CARS_HOURLY, currentHour);
 
 
     // increase Show Count only when show is open

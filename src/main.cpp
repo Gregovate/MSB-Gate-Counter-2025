@@ -8,6 +8,11 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.8 — 2026-11-05
+ *   - Share complete hourly JSON and canonical per-hour topic reporting.
+ *   - Correct Gate double-slash hourly topics; preserve case-sensitive names.
+ *   - Service count retries/date rollover in every main loop, not just events.
+ *   - Document the HA naming contract and remaining configuration dependencies.
  * 25.12.28.0-modular-test.7 — 2026-11-05
  *   - Stop publishing firmware timing defaults onto HA command topics.
  *   - Share State-only reporting; acknowledge applied settings and repeat them
@@ -47,7 +52,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.7";
+const char FWVersion[] = "25.12.28.0-modular-test.8";
 
 #include "traffic/Firmware.h"
 
@@ -235,6 +240,8 @@ void setup() {
 
 void loop() {
     updateRecordingCalendar();
+    // Retry durable saves and roll full dates even when no vehicle arrives.
+    serviceCountState();
     DateTime now = rtc.now();
 
     currentTimeMinute = now.hour()*60 + now.minute(); // convert time to minutes since midnight

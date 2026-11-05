@@ -31,6 +31,7 @@ void publishMQTT(const char *topic, const String &message) {
 
 void KeepMqttAlive() {
     publishTimingConfig();
+    publishHourlySnapshot();
     publishCountHealth();
     publishRecordingCalendar();
 

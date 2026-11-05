@@ -190,7 +190,7 @@ void getHourlyData() {
                     // ---- NEW: publish retained hourly value for dashboards ----
                     char hourlyTopic[120];
                     snprintf(hourlyTopic, sizeof(hourlyTopic),
-                            "%s/%02d", MQTT_PUB_CARS_HOURLY, i);
+                            "%s%02d", MQTT_PUB_CARS_HOURLY, i);
                     publishMQTT(hourlyTopic, String(hourlyCount[i]), true);
 
                     // ---- OPTIONAL: quiet MQTT debug to avoid 24-line spam ----
@@ -347,11 +347,11 @@ void saveHourlyCounts() {
 
     // -------------------------------------------------
     // GAL 25-11-24: Publish current hour's data to MQTT
-    // NEW tree: msb/traffic/GateCounter/Cars/Hourly/07
+    // NEW tree: msb/traffic/GateCounter/Cars/hour/07
     // -------------------------------------------------
     char hourlyTopic[120];
     snprintf(hourlyTopic, sizeof(hourlyTopic),
-             "%s/%02d", MQTT_PUB_CARS_HOURLY, currentHour);
+             "%s%02d", MQTT_PUB_CARS_HOURLY, currentHour);
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
     // Write updated content back to the file
