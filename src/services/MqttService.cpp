@@ -4,19 +4,9 @@
 
 
 void publishMQTT(const char *topic, const String &message, bool retainFlag) {
-    if (!countTopicPublishable(topic)) return;
-    if (mqtt_client.connected()) {
-        mqtt_client.publish(topic, message.c_str(), retainFlag);
-    } else {
-        if (publishQueue.size() >= MAX_QUEUE) {
-            publishQueue.pop();  // drop oldest
-        }
-        Serial.printf("MQTT not connected. QUEUEING: %s -> %s (retain=%d)\n",
-                      topic, message.c_str(), retainFlag);
-
-        publishQueue.push(encodeQueuedMessage(topic, message, retainFlag));
-    }
-    start_MqttMillis = millis();
+    if (!countTopicPublishable(topic) || !mqttOnline()) return;
+    mqtt_client.publish(topic,message.c_str(),retainFlag);
+    start_MqttMillis=millis();
 }
 
 void publishMQTT(const char *topic, const String &message) {
@@ -30,7 +20,10 @@ void publishMQTT(const char *topic, const String &message) {
 
 
 void KeepMqttAlive() {
+    inParkCars=carCounterCars-totalDailyCars;
     publishTimingConfig();
+    publishOperatingSettings();
+    publishMQTT(MQTT_PUB_ALARM, gateStuckAlarmActive ? "ALARM_GATE_STUCK" : "CLEAR", true);
     publishHourlySnapshot();
     publishCountHealth();
     publishRecordingCalendar();
@@ -112,138 +105,40 @@ void publishTimingConfig() {
     publishConfigState(MQTT_SUB_CARMS, String(carDetectMS));
 }
 
-void callback(char* topic, byte* payload, unsigned int length) {
-
-  char message[length + 1];
-  strncpy(message, (char*)payload, length);
-  message[length] = '\0'; // Safely null-terminate the payload
-
-  // -------------------------------------------------
-  // Car Counter → ShowStartDate
-  // Topic: msb/traffic/CarCounter/Config/showStartDate
-  // Payload: YYYY-MM-DD
-  // -------------------------------------------------
-  if (topicIs(topic, "msb/traffic/CarCounter/Config/showStartDate")) {
-      acceptShowStartDate(String(message));
-      return;
-  }
-
-  // -------------------------------------------------
-  // Car Counter → EnterTotal (new tree)
-  // -------------------------------------------------
-  if (topicIs(topic, MQTT_SUB_CC_ENTER_TOTAL))  {
-    carCounterCars = atoi(message);
-    inParkCars = carCounterCars - totalDailyCars; // recalc cars in park
-
-    if (carCounterCars != lastcarCounterCars) {
-      publishStateExitInPark();
-      debugInPark("EnterUpdate");
-      lastcarCounterCars = carCounterCars;
+bool parseCountCorrection(const char* p,uint32_t& value) {
+    if (!*p) return false;
+    uint32_t n=0;
+    while (*p) {
+        if (*p<'0' || *p>'9' || n>(2147483647UL-(*p-'0'))/10) return false;
+        n=n*10+(*p++-'0');
     }
-    return;
-  }
-
-  // -------------------------------------------------
-  // Car Counter → Calendar mirror to GateCounter
-  // -------------------------------------------------
-  if (topicIs(topic, MQTT_SUB_CC_DAY_OF_MONTH)) {
-    dayOfMonth = atoi(message);
-    saveDayOfMonth();
-
-    // Re-publish under the GateCounter tree so HA keeps using existing sensors
-    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
-
-    Serial.print(F(" GateCounter DayOfMonth mirrored from CarCounter: "));
-    Serial.println(dayOfMonth);
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_CC_DAYS_RUNNING)) {
-      daysRunning = recordingDaysRunning();
-      publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-      return;
-  }
-
-  // -------------------------------------------------
-  // Config resets / setpoints (new tree)
-  // -------------------------------------------------
-  if (topicIs(topic, MQTT_SUB_GATE_RESET_DAILY)) {
-    totalDailyCars = atoi(message);
-    saveDailyTotal();
-    Serial.println(F(" Gate Counter Updated"));
-
-    publishStateExitInPark();
-    publishDebugLog("Daily Total Updated");
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_GATE_RESET_SHOW)) {
-    totalShowCars = atoi(message);
-    saveShowTotal();
-    Serial.println(F(" Show Counter Updated"));
-
-    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
-    publishDebugLog("Show Counter Updated");
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_GATE_RESET_DOM)) {
-    dayOfMonth = atoi(message);
-    saveDayOfMonth();
-    Serial.println(F(" Calendar Day of Month Updated"));
-
-    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
-    publishDebugLog("Calendar Day Updated");
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_GATE_RESET_DAYS)) {
-    daysRunning = atoi(message);
-    saveDaysRunning();
-    Serial.println(F(" Days Running Updated"));
-
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-    publishDebugLog("Days Running Reset");
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_GATE_TIMEOUT)) {
-    gateCounterTimeout = atoi(message);
-    Serial.print(F(" Gate Counter Alarm Timer Updated (ms): "));
-    Serial.println(gateCounterTimeout);
-
-    // // Echo the new value back out so MQTT has a retained state
-    // publishMQTT(MQTT_SUB_GATE_TIMEOUT, String(gateCounterTimeout), true);
-
-    publishDebugLog("Gate Counter Timeout Updated");
-    publishTimingConfig();
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_CARMS)) {
-    carDetectMS = atoi(message);
-    Serial.print(F(" Gate Counter carDetectMS Updated (ms): "));
-    Serial.println(carDetectMS);
-
-    // DO NOT echo this topic back to MQTT – HA owns this value.
-    // publishMQTT(MQTT_SUB_CARMS, String(carDetectMS), true);
-
-    publishDebugLog("Gate Counter carDetectMS Updated");
-    publishTimingConfig();
-    return;
-  }
-
-  if (topicIs(topic, MQTT_SUB_LOGGING)) {
-    if (strcmp(message, "1") == 0) {
-      loggingEnabled = true;
-      Serial.println("Sensor logging ENABLED.");
-      publishDebugLog("Logging Enabled");
-    } else if (strcmp(message, "0") == 0) {
-      loggingEnabled = false;
-      Serial.println("Sensor logging DISABLED.");
-      publishDebugLog("Logging Disabled");
-    }
-    return;
-  }
+    value=n;return true;
 }
 
+void callback(char* topic, byte* payload, unsigned int length) {
+    // Bound stack use and reject embedded NULs/truncated command payloads.
+    if (length>180) return;
+    char message[181];memcpy(message,payload,length);message[length]='\0';
+    if (strlen(message)!=length) return;
+    if (handleOperatingCommand(topic,message)) return;
+    String command(topic);
+    if (command==String(topic_base_path)+"/Config/showStartDate") {
+        acceptShowStartDate(String(message));return;
+    }
+    if (topicIs(topic,MQTT_SUB_CC_ENTER_TOTAL)) {
+        uint32_t count=0;if (!parseCountCorrection(message,count)) return;
+        carCounterCars=count;inParkCars=carCounterCars-totalDailyCars;
+        publishStateExitInPark();return;
+    }
+    if (topicIs(topic,MQTT_SUB_LOGGING)) {
+        if (strcmp(message,"1")==0) loggingEnabled=true;
+        else if (strcmp(message,"0")==0) loggingEnabled=false;
+        return;
+    }
+    // Old retained resets, calendar mirrors and individual timing commands
+    // are deliberately inert. RTC owns the date; HA owns the full settings transaction.
+}
+
+void applyOperatingDetector(int alarmMs,int detectMs) {
+    gateCounterTimeout=alarmMs;carDetectMS=detectMs;
+}

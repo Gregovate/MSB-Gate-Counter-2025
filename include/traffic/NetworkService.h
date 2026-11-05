@@ -6,3 +6,5 @@ void setup_wifi();
 void MQTTreconnect();
 void checkWiFiConnection();
 void configureWifiAccessPoints();
+
+void configureAdditionalWifiAccessPoints();

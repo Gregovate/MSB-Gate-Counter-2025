@@ -60,9 +60,7 @@ void countTheCar() {
 
 
     // increase Show Count only when show is open
-    if (showTime == true) {
-        totalShowCars++;
-    }
+    recordOfficialVehicle();
 
     // Commit this vehicle as one dated daily/show/hourly checkpoint before
     // MQTT or the web-facing files can delay persistence.

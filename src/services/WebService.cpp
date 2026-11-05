@@ -297,6 +297,20 @@ void setupServer() {
     // Seasonal ShowSummary.csv
     // /GC/YYYY/ShowSummary.csv  (seasonFolder should already be /GC/YYYY)
     // ----------------------------
+    // Same bucket schema as Car; reuse the existing dynamic CSV viewer.
+    server.on("/ShowSummaryBuckets.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
+        String path=String(seasonFolder)+"/ShowSummaryBuckets.csv";
+        if (!SD.exists(path)) {request->send(404,"text/plain","No bucket summary yet");return;}
+        request->send(SD,path,"text/csv");
+    });
+    server.on("/showSummaryBuckets.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+        File f=recordingOpen("/data/showSummary.html",FILE_READ);
+        if (!f) {request->send(404,"text/plain","Summary viewer missing");return;}
+        String html=f.readString();f.close();
+        html.replace("/ShowSummary.csv","/ShowSummaryBuckets.csv");
+        request->send(200,"text/html",html);
+    });
+
     server.on("/ShowSummary.csv", HTTP_GET, [](AsyncWebServerRequest *request) {
 
         String fullPath = String(seasonFolder) + "/ShowSummary.csv";

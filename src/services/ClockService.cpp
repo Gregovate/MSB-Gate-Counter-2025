@@ -17,74 +17,7 @@ int computeDaysRunningFromStart() {
 
 
 void timeTriggeredEvents() {
-    if (!rtcReady || rtc.lostPower() || rtc.now().year() != recordingYear()) return;
-    DateTime now = rtc.now();
-
-    // Full-date rollover is serviced before detection, not at 23:59.
-    if (!countsReady()) return;
-
-    // Increment days running only if not Christmas Eve
-    if (now.day() != lastDayOfMonth) {
-        if (!(now.month() == 12 && now.day() == 24) && !flagDaysRunningReset) {
-            daysRunning = computeDaysRunningFromStart();
-            saveDaysRunning();
-            publishMQTT(MQTT_DEBUG_LOG, "Days running: " + String(daysRunning));
-        }
-        dayOfMonth = now.day(); // Update day of month
-        saveDayOfMonth(); // Save new day of month
-        getDayOfMonth(); // Get Day of month
-        publishMQTT(MQTT_DEBUG_LOG, "Day of month: " + String(dayOfMonth));
-        flagDaysRunningReset = true;
-    }
-
-    // Reset total daily cars for show to 0 at 5:10 PM
-    if (recordingShowSeasonActive() && now.hour() == 17 && now.minute() == 8 && !flagDailyShowStartReset) {
-        if (resetCountsForShow())
-            publishMQTT(MQTT_DEBUG_LOG, "Show-window daily reset checkpointed");
-    }
-
-    // Save daily summary at 9:20 PM
-    if (recordingShowSeasonActive() && now.hour() == 21 && now.minute() == 20 && !flagDailyShowSummarySaved) {
-        saveDailyShowSummary();
-        publishMQTT(MQTT_DEBUG_LOG, "Daily Show Summary Saved");
-        flagDailyShowSummarySaved = true;
-    }
-
-    // 5 minute Event Timer
-    if (now.minute() %5 == 0  && !flagHourlyReset) {
-        //saveHourlyCounts(); // Saves hourly counts
-        flagHourlyReset = true;
-        // Add debug message with counts
-        char debugMessage[100]; // Increase size if necessary
-        int currentHour = now.hour(); // Get the current hour
-        snprintf(debugMessage, sizeof(debugMessage), "Hourly data saved for hour %02d. Current count: %d.", 
-                currentHour, hourlyCount[currentHour]);
-        // Publish the debug message
-        publishMQTT(MQTT_DEBUG_LOG, debugMessage);
-        Serial.println(debugMessage); // Print to serial for debugging
-    }
-
-    // reset 5 Min Event Timer
-    if (now.minute() %5 != 0) {
-        flagHourlyReset = false;
-    }
-
-
-    // Reset flags for the next day at 12:01:01 AM
-    if (now.hour() == 0 && now.minute() == 1 && now.second() == 1 && !resetFlagsOnce) { 
-        flagDaysRunningReset = false;
-        flagMidnightReset = false;
-        flagDailyShowStartReset = false;
-        flagDailySummarySaved = false;
-        flagDailyShowSummarySaved = false;
-        flagHourlyReset = false;
-        publishMQTT(MQTT_DEBUG_LOG, "Run once flags reset for new day");
-        resetFlagsOnce = true; // Prevent further execution within the same day
-    }
-
-    // Reset the `resetFlagsOnce` at 12:02:00 AM to allow it to run the next day
-    if (now.hour() == 0 && now.minute() == 2 && now.second() == 0) {
-        resetFlagsOnce = false; // Allow reset logic to run again the next day
-    }
+    // One shared HA-configured scheduler, independent of MQTT availability.
+    serviceShowSchedule();
 }
 
