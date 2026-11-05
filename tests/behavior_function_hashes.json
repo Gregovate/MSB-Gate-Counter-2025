@@ -40,7 +40,7 @@
   "saveDailyTotal": "b72a39ff63a60986dbecda8a94476dd3e974114082352fde19c2dcc041f15bda",
   "saveDayOfMonth": "5a0f988bfafb79cf2e66007b76af57db621b5ac42bfc95654f5fdd8d191c772e",
   "saveDaysRunning": "b27b26905ff207dedb8c2ee52528d9f41c6daa6c411c1ac8171a70c0d56e3b92",
-  "saveHourlyCounts": "d09507e7a662f15c62b287a191d8af02eb3112814fbf447c38d12074e1bf88a2",
+  "saveHourlyCounts": "dc1ad0866cab9d224f66975aa7870044f747e1c69c0bdbe1f7aab28cb71b506f",
   "saveShowStartDate": "5cdcecc3f4dd8778d199cc031196d7e501580b3589a29f70ef8ff9f702cc0377",
   "saveShowTotal": "c25bbf8426a7aa1acdc64d8ad81b6cda40a9b561bb9e8e545813051120873b84",
   "setup": "c123f3b1655e416c9b928b1227543699f0ab1f099cc7b5499d456ec732200e4e",
@@ -58,13 +58,14 @@
   "readLegacyCount": "2cc1ca117dbe7ff4f076c3aed15ea49484c87bfa90107690108da8ec957da1f6",
   "loadLegacyCounts": "0cb157e25d3f13f71e0e0771a8c25c9008c80e7d7fbda5499fae241b624501a7",
   "noteFreshCountFolder": "7c0b19c1f3071e5621ec4dd82f738b17686288e3481ab0aada5c0e5d72a24b74",
-  "publishCountHealth": "36c88c399185998cb313ae687cd62609b83c41c42770c2303e59ee4f0bdb63b2",
+  "publishCountHealth": "3cc1e1e3a4160db61a9e30d4f364130e286de3a44f4b3747f287d9c27a4a0055",
   "countsReady": "fc934bd07cb167aa03b9648669066f95e8d318b2d626d3c932e4092e37f91a4c",
   "countTopicPublishable": "553bd1a696689432f6b784a542d00319d81b127bfbb484182d6bc38ec64b216f",
   "restoreCountState": "67053201b3e460ed266469f5a633b64a1217e4746278320a9af057318bef18d0",
   "persistCountState": "2c04115b2afc5f9146b5e89e0c99b0de167fa65741f440fc5bfaf17f7e6e8af0",
   "serviceCountState": "8184131f8b50e74fdabedfd957197daf279c144f610d15b00011d0a835e6e4b7",
   "resetCountsForShow": "a4460f5d419dcc035f0118c65999fcca5a6bdc5acad4a5796969108782ed6711",
-  "recoverHourlyExport": "53e42afcbd04c96c2c4aa31f3a9809b88d26e4972782b3f1b20756f72c487fc2",
-  "writeHourlyExport": "5e49706418569b52e065c71773ff7e5de777b021756eba1443783076b9b3adfa"
+  "recoverHourlyExport": "9454008c3180aa2f9d3e7f8861e7b4a00b7dc489a717ff6959a844463c5e8275",
+  "writeHourlyExport": "3f2922b2ec57c7004ecbb6024afcf2b43dac3973d74bf5e958bb8b5937a7f289",
+  "reportHourlyExportStatus": "bde61168fa54b8af2f917dbe58270549af1afb4ea2821a0683f8b7746dccc917"
 }
