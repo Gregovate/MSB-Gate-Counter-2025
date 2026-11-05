@@ -31,6 +31,11 @@ void logSensorStates() {
 
 void countTheCar() {
     serviceCountState(); // Network work may have crossed midnight since loop start.
+    if (!countsReady()) {
+        // Preserve events during recovery without writing zero/fictitious dates.
+        recordPendingVehicle();
+        return;
+    }
     DateTime now = rtc.now();
 
     // Build a fresh timestamp string (do NOT use now.toString(buf2) here)
