@@ -6,14 +6,16 @@ String sPath(const char *fname) {
 }
 
 void ensureSeasonFolderExists(int seasonYear) {
+    // Ignore external season arguments; only the persisted calendar year owns paths.
+    seasonYear = recordingYear();
     String base = "/GC";
     String seasonPath = base + "/" + String(seasonYear);
 
     if (!SD.exists(base)) {
-        SD.mkdir(base);
+        recordingMkdir(base);
     }
     if (!SD.exists(seasonPath)) {
-        SD.mkdir(seasonPath);
+        recordingMkdir(seasonPath);
         Serial.printf("Created season folder: %s\n", seasonPath.c_str());
     }
 }
@@ -51,7 +53,7 @@ void initSeasonalPaths() {
 }
 
 void saveShowStartDate() {
-    File f = SD.open(fileNameShowStart, FILE_WRITE);
+    File f = recordingOpen(fileNameShowStart, FILE_WRITE);
     if (f) {
         f.printf("%04d-%02d-%02d\n", showStartYear, showStartMonth, showStartDay);
         f.close();
@@ -59,28 +61,13 @@ void saveShowStartDate() {
 }
 
 void getShowStartDate() {
-    File f = SD.open(fileNameShowStart, FILE_READ);
-    if (!f) {
-        Serial.println("No saved show start date.");
-        return;
-    }
-
-    char buf[20];
-    int y, m, d;
-
-    if (f.readBytesUntil('\n', buf, sizeof(buf)) > 0) {
-        if (sscanf(buf, "%d-%d-%d", &y, &m, &d) == 3) {
-            showStartYear = y;
-            showStartMonth = m;
-            showStartDay = d;
-            showStartDateValid = true;
-        }
-    }
-    f.close();
+    // Shared verified configuration replaces the legacy split string/numeric state.
+    // Never import stale ShowStart.txt from an annual data folder.
+    applyRecordingCalendar();
 }
 
 void getDailyTotal() {
-    myFile = SD.open(fileName1, FILE_READ);
+    myFile = recordingOpen(fileName1, FILE_READ);
     if (myFile) {
         while (myFile.available()) {
             totalDailyCars = myFile.parseInt(); // read total
@@ -103,7 +90,7 @@ void getDailyTotal() {
 }
 
 void getShowTotal() {
-    myFile = SD.open(fileName2, FILE_READ);
+    myFile = recordingOpen(fileName2, FILE_READ);
     if (myFile) {
         while (myFile.available()) {
             totalShowCars = myFile.parseInt(); // read total
@@ -122,7 +109,7 @@ void getShowTotal() {
 }
 
 void getDayOfMonth() {
-    myFile = SD.open(fileName3, FILE_READ);
+    myFile = recordingOpen(fileName3, FILE_READ);
     if (myFile) {
         while (myFile.available()) {
             lastDayOfMonth = myFile.parseInt(); // read day Number
@@ -141,7 +128,7 @@ void getDayOfMonth() {
 }
 
 void getDaysRunning() {
-    myFile = SD.open(fileName4, FILE_READ);
+    myFile = recordingOpen(fileName4, FILE_READ);
     if (myFile) {
         while (myFile.available()) {
             daysRunning = myFile.parseInt(); // read day Number
@@ -165,7 +152,7 @@ void getHourlyData() {
     snprintf(dateBuffer, sizeof(dateBuffer), "%04d-%02d-%02d", now.year(), now.month(), now.day());
 
     // Open the file for reading
-    File file = SD.open(fileName5, FILE_READ);
+    File file = recordingOpen(fileName5, FILE_READ);
     if (!file) {
         Serial.println("Failed to open GateHourlyData.csv. Resetting hourly data.");
         publishMQTT(MQTT_DEBUG_LOG, "Failed to open GateHourlyData.csv. Resetting hourly data.");
@@ -232,7 +219,7 @@ void getHourlyData() {
 }
 
 void saveDailyTotal() {
-    myFile = SD.open(fileName1, FILE_WRITE);
+    myFile = recordingOpen(fileName1, FILE_WRITE);
     if (myFile) {
         myFile.print(totalDailyCars);
         myFile.close();
@@ -247,7 +234,7 @@ void saveDailyTotal() {
 }
 
 void saveShowTotal() {  
-    myFile = SD.open(fileName2, FILE_WRITE);
+    myFile = recordingOpen(fileName2, FILE_WRITE);
     if (myFile) {
         myFile.print(totalShowCars);
         myFile.close();
@@ -261,7 +248,7 @@ void saveShowTotal() {
 }
 
 void saveDayOfMonth() {
-    myFile = SD.open(fileName3, FILE_WRITE);
+    myFile = recordingOpen(fileName3, FILE_WRITE);
     if (myFile) {
         myFile.print(dayOfMonth);
         myFile.close();
@@ -275,7 +262,7 @@ void saveDayOfMonth() {
 }
 
 void saveDaysRunning() {
-    myFile = SD.open(fileName4, FILE_WRITE);
+    myFile = recordingOpen(fileName4, FILE_WRITE);
     if (myFile) {
       myFile.print(daysRunning);
       myFile.close();
@@ -295,7 +282,7 @@ void saveHourlyCounts() {
 
     int currentHour = now.hour(); // Get the current hour (0-23)
 
-    File file = SD.open(fileName5, FILE_READ);
+    File file = recordingOpen(fileName5, FILE_READ);
     String updatedContent = "";
     bool rowExists = false;
 
@@ -353,7 +340,7 @@ void saveHourlyCounts() {
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
     // Write updated content back to the file
-    file = SD.open(fileName5, FILE_WRITE);
+    file = recordingOpen(fileName5, FILE_WRITE);
     if (file) {
         file.print(updatedContent);
         file.close();
@@ -401,7 +388,7 @@ void saveDailyShowSummary() {
     float showAverageTemp = (showTempCount > 0) ? (showTempSum / showTempCount) : 0.0;
 
     // Open file for appending
-    File summaryFile = SD.open(fileName7, FILE_APPEND);
+    File summaryFile = recordingOpen(fileName7, FILE_APPEND);
     if (!summaryFile) {
         Serial.println("Failed to open daily show summary file.");
         publishMQTT(MQTT_DEBUG_LOG, "Failed to open daily show summary file.");
@@ -508,13 +495,13 @@ void checkAndCreateFile(const String &fileName, const String &header) {
     if (!SD.exists(fileName)) {
         Serial.printf("%s not found. Creating...\n", fileName.c_str());
         if (fileName.endsWith("/")) { // Create directory if it ends with '/'
-            if (!SD.mkdir(fileName)) {
+            if (!recordingMkdir(fileName)) {
                 Serial.printf("Failed to create directory %s\n", fileName.c_str());
             } else {
                 Serial.printf("Directory %s created successfully\n", fileName.c_str());
             }
         } else { // Create file if not a directory
-            File file = SD.open(fileName, FILE_WRITE);
+            File file = recordingOpen(fileName, FILE_WRITE);
             if (!file) {
                 Serial.printf("Failed to create file %s\n", fileName.c_str());
             } else {
@@ -531,7 +518,7 @@ void checkAndCreateFile(const String &fileName, const String &header) {
 void createAndInitializeHourlyFile(const String &fileName) {
     if (!SD.exists(fileName)) {
         Serial.printf("%s not found. Creating...\n", fileName.c_str());
-        File file = SD.open(fileName, FILE_WRITE);
+        File file = recordingOpen(fileName, FILE_WRITE);
         if (!file) {
             Serial.printf("Failed to create file %s\n", fileName.c_str());
             return;
@@ -594,10 +581,29 @@ void initSDCard() {
 
   Serial.printf("SD Card Size: %lluMB\n", cardSize);
   Serial.println(F("SD CARD INITIALIZED."));
+  loadRecordingCalendarFromSD();
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,line1);
   display.printf("SD Card Size: %lluMB\n", cardSize);
   display.display();
+}
+
+
+// Device adapter; the calendar policy itself is shared with Car.
+void applyRecordingCalendar() {
+    DateTime start=recordingShowStart();
+    showStartYear=start.year(); showStartMonth=start.month(); showStartDay=start.day();
+    char date[11]; snprintf(date,sizeof(date),"%04d-%02d-%02d",showStartYear,showStartMonth,showStartDay);
+    showStartDate=String(date); showStartDateValid=true;
+    if (SD.cardType()==CARD_NONE) { seasonFolder="/GC/"+String(recordingYear()); return; }
+    initSeasonalPaths();
+    checkAndCreateFile(fileName1);
+    checkAndCreateFile(fileName2);
+    checkAndCreateFile(fileName3);
+    checkAndCreateFile(fileName4);
+    checkAndCreateFile(fileName6,"DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, timeBetweenCars_ms");
+    checkAndCreateFile(fileName7,"Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
+    createAndInitializeHourlyFile(fileName5);
 }

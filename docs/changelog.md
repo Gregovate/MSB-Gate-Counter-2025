@@ -1,3 +1,14 @@
+## 25.12.28.0-modular-test.3 — 2026-11-04
+
+- Shared persistent calendar-year routing and historical-folder write protection.
+- Black Friday fallback; validated current-year HA override saved to NVS and two verified SD copies.
+- Shared days-running calculation (zero before opening), current-year show gating, and separate accepted-date telemetry.
+- Runtime year rollover and network-clock retry without moving the recording year backward.
+- Web upload/delete/rename protection; per-request upload handles.
+- MQTT connects after SD restoration; Car also restores show total on a new-day reboot.
+- Native regression checks and ESP32 compile/link checks pass; licensed build/hardware acceptance pending.
+- Scope and remaining reliability work: [Recording year protection](Recording_Year_Protection.md).
+
 ### [24.12.26.1] - YYYY-MM-DD
 - Added alarm if beam sensor remains high for more than 3 minutes
 
@@ -200,4 +211,5 @@
 ---
 
 For more information, see the [README.md](README.md) file.
+
 

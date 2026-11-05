@@ -15,7 +15,7 @@ void listSDFiles(AsyncWebServerRequest *request) {
     String fileList = "Files in " + currentDirectory + ":\n";
     fileList += "Name\tSize (bytes)\tLast Write\n";
 
-    File root = SD.open(currentDirectory);
+    File root = recordingOpen(currentDirectory);
     if (!root || !root.isDirectory()) {
         request->send(500, "text/plain", "Failed to open directory: " + currentDirectory);
         return;
@@ -81,18 +81,24 @@ void downloadSDFile(AsyncWebServerRequest *request) {
 }
 
 void uploadSDFile(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    static File uploadFile; // Keep track of the currently uploading file
+    File &uploadFile = request->_tempFile; // Keep track of the currently uploading file
 
     // Use buildPath instead of manual concat
     String fullPath = buildPath(currentDirectory, filename);  // <--- THIS LINE ONLY CHANGE
 
     // Handle the start of the upload
+    // Check every chunk, including uploads crossing January 1.
+    if (!recordingWebWritable(index == 0 ? fullPath : String(uploadFile.path()))) {
+        if (uploadFile) uploadFile.close();
+        request->send(403, "text/plain", "Protected recording folder or recovery file");
+        return;
+    }
     if (index == 0) {
         Serial.printf("Upload started: %s\n", fullPath.c_str());
         if (SD.exists(fullPath)) {
-            SD.remove(fullPath); // Remove the file if it already exists
+            recordingRemove(fullPath); // Remove the file if it already exists
         }
-        uploadFile = SD.open(fullPath, FILE_WRITE);
+        uploadFile = recordingOpen(fullPath, FILE_WRITE);
         if (!uploadFile) {
             Serial.printf("Failed to open file: %s\n", fullPath.c_str());
             request->send(500, "text/plain", "Failed to open file for writing");
@@ -148,7 +154,7 @@ void changeDirectory(AsyncWebServerRequest *request) {
 
     // Must exist AND be a directory
     if (SD.exists(target)) {
-        File f = SD.open(target);
+        File f = recordingOpen(target);
         if (f && f.isDirectory()) {
             f.close();
             currentDirectory = target;
@@ -178,9 +184,12 @@ void deleteSDFile(AsyncWebServerRequest *request) {
     if (fullPath.startsWith("//")) {
         fullPath = fullPath.substring(1); // Remove redundant leading slashes
     }
-
+    if (!recordingWebWritable(fullPath)) {
+        request->send(403, "text/plain", "Protected recording folder or recovery file");
+        return;
+    }
     if (SD.exists(fullPath)) {
-        if (SD.remove(fullPath)) {
+        if (recordingRemove(fullPath)) {
             Serial.printf("File deleted: %s\n", fullPath.c_str());
             request->send(200, "text/plain", "File deleted successfully: " + fullPath);
         } else {
@@ -222,8 +231,12 @@ void renameSDFile(AsyncWebServerRequest *request) {
         request->send(409, "text/plain", "Target already exists: " + newPath);
         return;
     }
+    if (!recordingWebWritable(oldPath) || !recordingWebWritable(newPath)) {
+        request->send(403, "text/plain", "Protected recording folder or recovery file");
+        return;
+    }
 
-    if (SD.rename(oldPath, newPath)) {
+    if (recordingRename(oldPath, newPath)) {
         Serial.printf("File renamed: %s -> %s\n", oldPath.c_str(), newPath.c_str());
         request->send(200, "text/plain",
                       "File renamed: " + oldPath + " -> " + newPath);
@@ -339,18 +352,24 @@ void setupServer() {
 
             // Guarantee /data exists (same behavior as Car Counter)
             if (!SD.exists("/data")) {
-                SD.mkdir("/data");
+                recordingMkdir("/data");
             }
 
             String fullPath = "/data/" + filename;
-            static File uploadFile;
+            File &uploadFile = request->_tempFile;
+            // Check every chunk, including uploads crossing January 1.
+            if (!recordingWebWritable(index == 0 ? fullPath : String(uploadFile.path()))) {
+                if (uploadFile) uploadFile.close();
+                request->send(403, "text/plain", "Protected recording folder or recovery file");
+                return;
+            }
 
             if (index == 0) {  // First chunk
                 if (SD.exists(fullPath)) {
-                    SD.remove(fullPath);
+                    recordingRemove(fullPath);
                 }
 
-                uploadFile = SD.open(fullPath, FILE_WRITE);
+                uploadFile = recordingOpen(fullPath, FILE_WRITE);
                 if (!uploadFile) {
                     request->send(500, "text/plain", "Failed to open file for writing");
                     return;
@@ -405,3 +424,4 @@ void setupServer() {
     server.begin();
     Serial.println("HTTP server started");
 }
+

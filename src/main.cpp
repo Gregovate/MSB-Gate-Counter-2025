@@ -8,6 +8,13 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.3 — 2026-11-04
+ *   - Share persistent calendar-year selection; never reopen a prior year for writes.
+ *   - Protect historical SD folders from logging and web mutations.
+ *   - Derive Black Friday fallback annually; persist valid current-year HA dates.
+ *   - Report accepted date separately; reject stale dates and compute pre-show day 0.
+ *   - Rotate paths while running; retry network clock sync without rolling year back.
+ *   - Preserve GPIOs, detector timing and manual release control.
  * 25.12.28.0-modular-test.2 — 2026-11-04
  *   - Restore the editable firmware identifier and active changelog to main.cpp.
  *   - Share the identifier through FirmwareVersion.h; no duplicate version value.
@@ -21,7 +28,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.2";
+const char FWVersion[] = "25.12.28.0-modular-test.3";
 
 #include "traffic/Firmware.h"
 
@@ -85,7 +92,9 @@ void setup() {
 
     // Get NTP time from Time Server 
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    initializeRecordingCalendar();
     SetLocalTime();
+    updateRecordingCalendar();
     DateTime now = rtc.now();
 
     // Save boot timestamp
@@ -102,7 +111,7 @@ void setup() {
     }
   
     // MQTT Reconnection with login credentials
-    MQTTreconnect(); // Ensure MQTT is connected
+    // Connect after SD restoration so boot defaults are never advertised as totals.
 
     // After MQTT connect on Gate Counter: ensure alarm state is CLEAR and retained
     publishMQTT(MQTT_PUB_ALARM, "CLEAR", true);
@@ -191,6 +200,9 @@ void setup() {
 
     //on reboot, get totals saved on SD Card
     getSavedValuesOnReboot();  // Update/reset counts based on reboot day
+    daysRunning = recordingDaysRunning();
+    MQTTreconnect();
+    publishRecordingCalendar();
 
     // Setup MDNS
     if (!MDNS.begin(THIS_MQTT_CLIENT)) {
@@ -201,12 +213,13 @@ void setup() {
     start_MqttMillis = millis();
 }
 
-void loop() {  
+void loop() {
+    updateRecordingCalendar();
     DateTime now = rtc.now();
 
     currentTimeMinute = now.hour()*60 + now.minute(); // convert time to minutes since midnight
 
-    showTime = (currentTimeMinute >= showStartMin && currentTimeMinute <= showEndMin); // show is running and save counts
+    showTime = (recordingShowSeasonActive() && currentTimeMinute >= showStartMin && currentTimeMinute <= showEndMin); // show is running and save counts
 
     readTempandRH();          // Get Temperature and Humidity
 
@@ -226,3 +239,4 @@ void loop() {
         lastKeepAliveMillis = millis();
     }
 }
+

@@ -29,6 +29,7 @@ void publishMQTT(const char *topic, const String &message) {
 
 
 void KeepMqttAlive() {
+    publishRecordingCalendar();
 
     // ---- Heartbeat (retained, ONLY here) ----
     publishMQTT(MQTT_PUB_FIRMWARE, String(FWVersion), true);
@@ -121,9 +122,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // Payload: YYYY-MM-DD
   // -------------------------------------------------
   if (topicIs(topic, "msb/traffic/CarCounter/Config/showStartDate")) {
-      showStartDate = message;
-      showStartDateValid = (showStartDate.length() == 10); // "YYYY-MM-DD"
-      Serial.printf("ShowStartDate received: %s\n", showStartDate.c_str());
+      acceptShowStartDate(String(message));
       return;
   }
 
@@ -158,14 +157,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 
   if (topicIs(topic, MQTT_SUB_CC_DAYS_RUNNING)) {
-    daysRunning = atoi(message);
-    saveDaysRunning();
-
-    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
-
-    Serial.print(F(" GateCounter DaysRunning mirrored from CarCounter: "));
-    Serial.println(daysRunning);
-    return;
+      daysRunning = recordingDaysRunning();
+      publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
+      return;
   }
 
   // -------------------------------------------------
@@ -248,3 +242,4 @@ void callback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 }
+

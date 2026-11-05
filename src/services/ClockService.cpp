@@ -6,34 +6,18 @@
 
 
 int determineSeasonYear(const DateTime &now) {
-    int y = now.year();
-    int m = now.month();
-    if (m >= 11) return y;     // Nov/Dec = current year season
-    return y - 1;             // Jan–Oct belongs to previous season
+    (void)now;
+    return recordingYear();
 }
 
 int computeDaysRunningFromStart() {
-    if (!showStartDateValid) return daysRunning; // fallback
-
-    DateTime now = rtc.now();
-    DateTime start(showStartYear, showStartMonth, showStartDay, 0, 0, 0);
-
-    TimeSpan diff = now - start;
-    int computed = diff.days() + 1;   // opening night is Day 1
-
-    // Legacy Christmas Eve gap:
-    // if date is 12/24 or later, subtract 1 day
-    if (now.month() == 12 && now.day() >= 24) {
-        computed -= 1;
-    }
-
-    if (computed < 1) computed = 1;
-    return computed;
+    return recordingDaysRunning();
 }
 
 
 
 void timeTriggeredEvents() {
+    if (!rtcReady || rtc.lostPower() || rtc.now().year() != recordingYear()) return;
     DateTime now = rtc.now();
 
     // Reset hourly counts at midnight
@@ -58,7 +42,7 @@ void timeTriggeredEvents() {
     }
 
     // Reset total daily cars for show to 0 at 5:10 PM
-    if (now.hour() == 17 && now.minute() == 8 && !flagDailyShowStartReset) {
+    if (recordingShowSeasonActive() && now.hour() == 17 && now.minute() == 8 && !flagDailyShowStartReset) {
         totalDailyCars = 0;
         saveDailyTotal();
         publishMQTT(MQTT_DEBUG_LOG, "Total Exit Cars Reset at 5:08 PM");
@@ -66,7 +50,7 @@ void timeTriggeredEvents() {
     }
 
     // Save daily summary at 9:20 PM
-    if (now.hour() == 21 && now.minute() == 20 && !flagDailyShowSummarySaved) {
+    if (recordingShowSeasonActive() && now.hour() == 21 && now.minute() == 20 && !flagDailyShowSummarySaved) {
         saveDailyShowSummary();
         publishMQTT(MQTT_DEBUG_LOG, "Daily Show Summary Saved");
         flagDailyShowSummarySaved = true;
@@ -109,3 +93,4 @@ void timeTriggeredEvents() {
         resetFlagsOnce = false; // Allow reset logic to run again the next day
     }
 }
+

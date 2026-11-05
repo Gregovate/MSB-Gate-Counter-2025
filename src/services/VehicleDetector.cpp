@@ -19,7 +19,7 @@ void logSensorStates() {
         Serial.printf("%lu,%d,%d\n", currentTime, beamBState, beamAState);
 
         // OPTIONAL: Log to CSV file on SD card
-        File logFile = SD.open(fileName10, FILE_APPEND);
+        File logFile = recordingOpen(fileName10, FILE_APPEND);
         if (logFile) {
             logFile.printf("%lu,%d,%d\n", currentTime, beamBState, beamAState);
             logFile.close();
@@ -70,7 +70,7 @@ void countTheCar() {
     inParkCars = carCounterCars - totalDailyCars;
 
     // open file for writing Car Data
-    myFile = SD.open(fileName6, FILE_APPEND);
+    myFile = recordingOpen(fileName6, FILE_APPEND);
     if (myFile) {
         // DateTime
         myFile.print(timeBuf);
@@ -323,3 +323,4 @@ void detectCar() {
             break;
     }
 }
+
