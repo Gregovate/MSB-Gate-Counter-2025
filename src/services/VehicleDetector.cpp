@@ -30,6 +30,7 @@ void logSensorStates() {
 }
 
 void countTheCar() {
+    serviceCountState(); // Network work may have crossed midnight since loop start.
     DateTime now = rtc.now();
 
     // Build a fresh timestamp string (do NOT use now.toString(buf2) here)
@@ -50,8 +51,6 @@ void countTheCar() {
     int currentHour = now.hour();
     hourlyCount[currentHour]++;
 
-    saveDailyTotal();   // retain numbers with reboot
-    saveHourlyCounts();
 
     // Publish current hour's data to MQTT (NEW tree)
     // Final form: msb/traffic/GateCounter/Cars/Hourly/07
@@ -59,13 +58,22 @@ void countTheCar() {
     snprintf(hourlyTopic, sizeof(hourlyTopic),
              "%s/%02d", MQTT_PUB_CARS_HOURLY, currentHour);
 
-    publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
     // increase Show Count only when show is open
     if (showTime == true) {
         totalShowCars++;
-        saveShowTotal();
     }
+
+    // Commit this vehicle as one dated daily/show/hourly checkpoint before
+    // MQTT or the web-facing files can delay persistence.
+    persistCountState();
+    // Reporting continues if SD fails; countPersistence identifies durability.
+    publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
+    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
+    publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
+    saveDailyTotal();
+    saveShowTotal();
+    saveHourlyCounts();
 
     inParkCars = carCounterCars - totalDailyCars;
 

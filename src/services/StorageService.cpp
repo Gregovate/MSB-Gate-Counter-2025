@@ -15,7 +15,7 @@ void ensureSeasonFolderExists(int seasonYear) {
         recordingMkdir(base);
     }
     if (!SD.exists(seasonPath)) {
-        recordingMkdir(seasonPath);
+        if (recordingMkdir(seasonPath)) noteFreshCountFolder();
         Serial.printf("Created season folder: %s\n", seasonPath.c_str());
     }
 }
@@ -219,6 +219,8 @@ void getHourlyData() {
 }
 
 void saveDailyTotal() {
+    if (!countsReady()) return;
+    if (!persistCountState()) return; // Preserve exports when the checkpoint fails.
     myFile = recordingOpen(fileName1, FILE_WRITE);
     if (myFile) {
         myFile.print(totalDailyCars);
@@ -233,7 +235,9 @@ void saveDailyTotal() {
     publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
 }
 
-void saveShowTotal() {  
+void saveShowTotal() {
+    if (!countsReady()) return;
+    if (!persistCountState()) return; // Preserve exports when the checkpoint fails.
     myFile = recordingOpen(fileName2, FILE_WRITE);
     if (myFile) {
         myFile.print(totalShowCars);
@@ -276,13 +280,20 @@ void saveDaysRunning() {
 }
 
 void saveHourlyCounts() {
+    if (!countsReady()) return;
+    if (!persistCountState()) return; // Preserve exports when the checkpoint fails.
     DateTime now = rtc.now();
     char dateBuffer[13];
     snprintf(dateBuffer, sizeof(dateBuffer), "%04d-%02d-%02d", now.year(), now.month(), now.day());
 
     int currentHour = now.hour(); // Get the current hour (0-23)
 
+    if (!recoverHourlyExport(fileName5)) return;
     File file = recordingOpen(fileName5, FILE_READ);
+    if (!file) {
+        publishMQTT(MQTT_DEBUG_LOG, "Hourly export read failed; existing file preserved");
+        return;
+    }
     String updatedContent = "";
     bool rowExists = false;
 
@@ -303,9 +314,7 @@ void saveHourlyCounts() {
                     lastCommaIndex = (nextCommaIndex != -1) ? nextCommaIndex + 1 : lastCommaIndex;
 
                     // Replace value for the current hour
-                    updatedContent += (i == currentHour) 
-                                      ? "," + String(hourlyCount[i]) 
-                                      : "," + currentValue;
+                    updatedContent += "," + String(hourlyCount[i]);
                 }
                 updatedContent += "\n";
 
@@ -313,14 +322,19 @@ void saveHourlyCounts() {
                 updatedContent += line + "\n"; // Preserve other rows
             }
         }
+        bool complete=file.position()==file.size();
         file.close();
+        if (!complete) {
+            publishMQTT((String(topic_base_path)+"/System/hourlyExport").c_str(),"READ_FAILED_KEEP_FILE",true);
+            return;
+        }
     }
 
     // If no row exists for today, create a new one
     if (!rowExists) {
         updatedContent += dateBuffer;
         for (int i = 0; i < 24; i++) {
-            updatedContent += (i == currentHour) ? "," + String(hourlyCount[i]) : ",0";
+            updatedContent += "," + String(hourlyCount[i]);
         }
         updatedContent += "\n";
 
@@ -340,14 +354,7 @@ void saveHourlyCounts() {
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
 
     // Write updated content back to the file
-    file = recordingOpen(fileName5, FILE_WRITE);
-    if (file) {
-        file.print(updatedContent);
-        file.close();
-        Serial.printf("Hourly counts for hour %02d saved and published.\n", currentHour);
-    } else {
-        Serial.println("Failed to open GateHourlyData.csv for writing.");
-    }
+    writeHourlyExport(fileName5, updatedContent);
 }
 
 void saveDailyShowSummary() {
@@ -429,66 +436,15 @@ void saveDailyShowSummary() {
 }
 
 void getSavedValuesOnReboot() {
-    DateTime now = rtc.now();
-
-    // Read the last recorded day from the SD card
-    getDayOfMonth();
-    getShowStartDate();
-
-    // Check if the ESP32 is rebooting on a new day
-    if (now.day() != lastDayOfMonth) {
-        dayOfMonth = now.day();   // Update to the current day
-        saveDayOfMonth();         // Save the new day to the SD card
-
-        totalDailyCars = 0;       // Reset daily car count
-        saveDailyTotal();         // Persist reset
-
-        // Show total should NOT reset on a new day
-        getShowTotal();
-
-        // Recompute daysRunning, except on Christmas Eve (legacy gap rule)
-        if (!(now.month() == 12 && now.day() == 24)) {
-            daysRunning = computeDaysRunningFromStart();
-            saveDaysRunning();
-
-            publishMQTT(
-                MQTT_DEBUG_LOG,
-                "Rebooted on new day. DaysRunning recomputed from showStartDate."
-            );
-        } else {
-            publishMQTT(
-                MQTT_DEBUG_LOG,
-                "Rebooted on Christmas Eve. DaysRunning left unchanged (legacy gap)."
-            );
-        }
-
-        // Log the update
-        Serial.println("ESP32 reboot detected on a new day. Counts reset/updated.");
-        publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reset/updated for new day.");
-
-    } else {
-        // Same day reboot: reload everything
-        getDailyTotal();
-        getShowTotal();
-        getDaysRunning();
-        getHourlyData();
-
-        Serial.println("ESP32 reboot detected on the same day. Reloading saved counts.");
-        publishMQTT(MQTT_DEBUG_LOG, "Rebooted, Counts reloaded for same day.");
-    }
-
-    // -------------------------------------------------
-    // GAL 25-11-24: republish retained state on reboot
-    // so HA/Grafana never sit stale after ESP reboot.
-    // -------------------------------------------------
+    // Failed reads are unknown, never a zero to save back over the evidence.
+    if (!restoreCountState()) return;
+    // Repair web-facing exports from the restored checkpoint before reporting.
+    saveDailyTotal(); saveShowTotal(); saveHourlyCounts();
     inParkCars = carCounterCars - totalDailyCars;
-
-    // Calendar is now sourced from CarCounter → callback mirror
-    // publishMQTT(MQTT_PUB_DAYOFMONTH,  String(dayOfMonth),     true);
-    // publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning),    true);
-    publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-    publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+    publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
+    publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
+    publishMQTT(MQTT_PUB_DAYOFMONTH, String(dayOfMonth), true);
+    publishMQTT(MQTT_PUB_DAYSRUNNING, String(daysRunning), true);
 }
 
 void checkAndCreateFile(const String &fileName, const String &header) {
@@ -516,6 +472,7 @@ void checkAndCreateFile(const String &fileName, const String &header) {
 }
 
 void createAndInitializeHourlyFile(const String &fileName) {
+    if (!recoverHourlyExport(fileName)) return;
     if (!SD.exists(fileName)) {
         Serial.printf("%s not found. Creating...\n", fileName.c_str());
         File file = recordingOpen(fileName, FILE_WRITE);

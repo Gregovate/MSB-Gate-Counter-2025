@@ -20,13 +20,9 @@ void timeTriggeredEvents() {
     if (!rtcReady || rtc.lostPower() || rtc.now().year() != recordingYear()) return;
     DateTime now = rtc.now();
 
-    // Reset hourly counts at midnight
-    if (now.hour() == 23 && now.minute() == 59 && !flagMidnightReset) { 
-        resetHourlyCounts();  // Reset array for collecting hourly car counts      
-        totalDailyCars = 0;   // Reset total daily cars to 0 at midnight 
-        saveDailyTotal();        publishMQTT(MQTT_DEBUG_LOG, "Total cars reset at Midnight");        flagMidnightReset = true;
-    }
-    
+    // Full-date rollover is serviced before detection, not at 23:59.
+    if (!countsReady()) return;
+
     // Increment days running only if not Christmas Eve
     if (now.day() != lastDayOfMonth) {
         if (!(now.month() == 12 && now.day() == 24) && !flagDaysRunningReset) {
@@ -43,10 +39,8 @@ void timeTriggeredEvents() {
 
     // Reset total daily cars for show to 0 at 5:10 PM
     if (recordingShowSeasonActive() && now.hour() == 17 && now.minute() == 8 && !flagDailyShowStartReset) {
-        totalDailyCars = 0;
-        saveDailyTotal();
-        publishMQTT(MQTT_DEBUG_LOG, "Total Exit Cars Reset at 5:08 PM");
-        flagDailyShowStartReset = true;
+        if (resetCountsForShow())
+            publishMQTT(MQTT_DEBUG_LOG, "Show-window daily reset checkpointed");
     }
 
     // Save daily summary at 9:20 PM

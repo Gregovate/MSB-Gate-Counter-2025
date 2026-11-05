@@ -4,6 +4,7 @@
 
 
 void publishMQTT(const char *topic, const String &message, bool retainFlag) {
+    if (!countTopicPublishable(topic)) return;
     if (mqtt_client.connected()) {
         mqtt_client.publish(topic, message.c_str(), retainFlag);
     } else {
@@ -29,6 +30,7 @@ void publishMQTT(const char *topic, const String &message) {
 
 
 void KeepMqttAlive() {
+    publishCountHealth();
     publishRecordingCalendar();
 
     // ---- Heartbeat (retained, ONLY here) ----
