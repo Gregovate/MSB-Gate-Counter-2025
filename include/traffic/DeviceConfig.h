@@ -4,8 +4,9 @@
 #define OTA_Title "Gate Counter"
 #include "FirmwareVersion.h" // Version is edited at the top of src/main.cpp.
 #define THIS_MQTT_CLIENT "espGateCounter"
-#define magSensorPin 32 // Legacy name: Beam A in production dual-beam firmware
-#define beamSensorPin 33
+#define beamAPin 32 // Beam A: existing wiring retained
+#define beamBPin 33
+#define magneticSensorPin 25 // Independent EL817 diagnostic input, 3.3 V MCU side
 #define DHTPIN 4
 #define DHTTYPE DHT22
 #define PIN_SPI_CS 5

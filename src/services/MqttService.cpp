@@ -1,4 +1,5 @@
 #include "traffic/Firmware.h"
+#include "traffic/MagneticDiagnostics.h"
 
 // Extracted from the production baseline; behavior fixes are separate changes.
 
@@ -20,6 +21,7 @@ void publishMQTT(const char *topic, const String &message) {
 
 
 void KeepMqttAlive() {
+    publishMagneticDiagnostics();
     inParkCars=carCounterCars-totalDailyCars;
     publishTimingConfig();
     publishOperatingSettings();

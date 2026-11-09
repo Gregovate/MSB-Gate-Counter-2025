@@ -60,3 +60,13 @@ The private candidate sensor files correct the Car log duplicate/device/topic, s
 Gate applied carDetectMS State requires .7 or newer; Gate JSON requires .8. Do not install a partially matched HA/firmware set and interpret absent data as a device fault. Switch commands and automations are unchanged in this candidate. Full HA validation must run against the private live configuration, not only these include fragments.
 
 Hardware procedure: use Count_Persistence.md. After the agreed firmware update, inspect versions and canonical hourly topics read-only; compare JSON indices with individual hour topics, then verify health and a controlled count/reboot. No count resets, broker retained deletes or historical file rewrites are part of this migration.
+
+
+## Gate-only magnetic diagnostics (.11)
+
+GPIO25 is diagnostic only; GPIO32/33 remain Beam A/B. New topics:
+`Sensors/magneticRawState` (retained raw 0/1),
+`Diagnostics/magnetic/event` (non-retained event JSON), and
+`Diagnostics/magnetic/status` (retained loss/sampling/SD status), all beneath
+`msb/traffic/GateCounter/`. No magnetic command or count authority is added.
+See [release contract](Magnetic_Diagnostics_Release_11.md) for fields and limitations.

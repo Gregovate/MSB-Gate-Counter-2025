@@ -1,4 +1,5 @@
 #include "traffic/Firmware.h"
+#include "traffic/MagneticDiagnostics.h"
 
 // Extracted from the production baseline; behavior fixes are separate changes.
 void logSensorStates() {
@@ -10,18 +11,17 @@ void logSensorStates() {
     if (currentTime - lastLogTime >= 100) { // Log every 100 ms
         lastLogTime = currentTime;
 
-        // Read sensor states
-        beamBState = digitalRead(beamSensorPin); // Beam B: HIGH = clear, LOW = broken
-        //beamAState = !digitalRead(magSensorPin); // Active high
-        beamAState = digitalRead(magSensorPin);  // Beam A: HIGH = clear, LOW = broken  25-11-20 GAL took off invert     
+        // Legacy optional beam trace: observe without altering detector state.
+        const int beamBRaw = digitalRead(beamBPin);
+        const int beamARaw = digitalRead(beamAPin);
 
         // Log to Serial Monitor (or save to SD card)
-        Serial.printf("%lu,%d,%d\n", currentTime, beamBState, beamAState);
+        Serial.printf("%lu,%d,%d\n", currentTime, beamBRaw, beamARaw);
 
         // OPTIONAL: Log to CSV file on SD card
         File logFile = recordingOpen(fileName10, FILE_APPEND);
         if (logFile) {
-            logFile.printf("%lu,%d,%d\n", currentTime, beamBState, beamAState);
+            logFile.printf("%lu,%d,%d\n", currentTime, beamBRaw, beamARaw);
             logFile.close();
         } else {
             Serial.println("Failed to open sensorLog.csv");
@@ -130,8 +130,10 @@ void detectCar() {
     unsigned long currentMillis = millis();
 
     // Raw reads (25.11.21.1 VERIFIED): raw HIGH = broken, raw LOW = clear
-    bool rawA = digitalRead(magSensorPin);    // Beam A
-    bool rawB = digitalRead(beamSensorPin);   // Beam B
+    bool rawA = digitalRead(beamAPin);    // Beam A
+    bool rawB = digitalRead(beamBPin);   // Beam B
+
+    sampleMagneticDiagnostics(rawA, rawB);
 
     // ---- Debounce Beam A ----
     if (rawA != stableRawA) {
@@ -318,6 +320,7 @@ void detectCar() {
                 publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
                 publishMQTT(MQTT_COUNTER_LOG, "Car confirmed and counted!");
 
+                markMagneticBeamVehicle();
                 countTheCar();
 
                 // Between cars
@@ -334,4 +337,3 @@ void detectCar() {
             break;
     }
 }
-

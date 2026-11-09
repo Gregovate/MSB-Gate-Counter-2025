@@ -1,5 +1,5 @@
 {
-  "KeepMqttAlive": "ce4cdbd9528748ae3a554c972787e5281cd60b1c6cd779071c24484ceace8bab",
+  "KeepMqttAlive": "7246d70330d2b4640fe6355ff4bd0519260ca4c4051b5614a2fe1c6706b5a0ed",
   "SetLocalTime": "f2e9662d99e9af93794fdff67ac400016085c762f0b6c09f4da749287a9e888c",
   "acceptShowStartDate": "68e628189079b5766713940aa60905ae4063b733c988fec858afea7b631fea11",
   "applyRecordingCalendar": "83e09e16d46d1dcd28a2acfe795b7ca95a89d13b0a854da854b16f83eb25065c",
@@ -22,8 +22,8 @@
   "initializeRecordingCalendar": "0c22a549a1f7c9052d822ee62ef906e3dd624d146cf4721a16277fcad48da606",
   "listSDFiles": "0283df2645c8c3f0f2e314c35dd9b0ec1e26e459b76f042e45cd8c6fb272faf9",
   "loadRecordingCalendarFromSD": "f2f494ba8b1f7e91cc4e415b347e8cc872a1607f91c309265c2258eea06e87f6",
-  "logSensorStates": "6e2f2d75fd5adb37a4a8d2218c15984cf73143f64ec04b846c2721416efe4c30",
-  "loop": "fd40b3e91f210ed418039ee8ab0bd44115fbcda3358d6b6403b74e2fba488bf2",
+  "logSensorStates": "a300cd1d77b4f6311596a69a05d6f61ea2372e03ce9ac7b7c5f7a5efe92bf2b7",
+  "loop": "caf486ffb88f1143a7e3daab1822d0a9d561d454e295a8b04aff096bb4ba12e2",
   "noteNetworkClock": "9746c106dbf97c3eaff080c3de054f0bacb12e15dcf41cb99f1fadd3d8b71e11",
   "persistCalendar": "7ca95413e27b05b1f7e6311f6c122c3c6b4f8c895ec6d1727249a6c1b057fadc",
   "publishRecordingCalendar": "14134094cf9cbddd831373624c32f5a2394045e7664faf0ae9bdaf88857afc6e",
@@ -43,7 +43,7 @@
   "saveHourlyCounts": "38aa2bfd04d2598b8ee0a53043b52680181499d1f1fde04778e491ed26f79e33",
   "saveShowStartDate": "5cdcecc3f4dd8778d199cc031196d7e501580b3589a29f70ef8ff9f702cc0377",
   "saveShowTotal": "c25bbf8426a7aa1acdc64d8ad81b6cda40a9b561bb9e8e545813051120873b84",
-  "setup": "cc0e5eb6b5667d24b5997fd205a92145ab9a4c908eaac099388bdeceb3cf0510",
+  "setup": "eb901a32885655300dfe292f2d947eebeb356038de6176256755038dbad9e61b",
   "setupServer": "9fb5feb6c82b32d648c460b22125f01ebe77c86dc0151dcf74ab37fe7e26adbd",
   "timeTriggeredEvents": "a792b0d610bea7e791d966a6df78f94ee92914dc707cd0ba12fcefb5c577c537",
   "updateRecordingCalendar": "9036c55214dc744e14cef9553a66fcca3a514aaf2d7e693e6cd2a05a168ccf81",
@@ -106,5 +106,11 @@
   "configureAdditionalWifiAccessPoints": "5b658e56bf999194665024e245a24760d0a16aba67a4e506a8e3a5b9c2ea140f",
   "updateDisplay": "d7c44214fd02d14e3a9f6f9932b40791c8315bae840102084ed1c6b096109ec3",
   "loadPendingVehicles": "0865dc6f4855602962a018b2ab7fbb5e51e6399ad85f0668098dab8f67e836c4",
-  "recordPendingVehicle": "956f34d0f200fac3875278dc33c89213e391a76e8ece9dd2f95ff915ec09b123"
+  "recordPendingVehicle": "956f34d0f200fac3875278dc33c89213e391a76e8ece9dd2f95ff915ec09b123",
+  "detectCar": "c2909ef1f01ffd71f43f70fa16d0fb81b8b93d7c4a95aa043db7b26d1c6a864f",
+  "initializeMagneticDiagnostics": "ddf6ad8eb951726b5427942231c34548744caa3274234a08a81911b62bf2e71a",
+  "sampleMagneticDiagnostics": "efd1f5889b53785a4fbf346b70e270d2b9bee0a54e9da264fa091e19501e7efd",
+  "markMagneticBeamVehicle": "664a04dd8fde37039507010743e4a245ede8059422b0e8f138970c1ee3fb04dc",
+  "serviceMagneticDiagnostics": "b11e39aa806301b3509c4402817230f8df6307414cc56376a8b8626e1e124271",
+  "publishMagneticDiagnostics": "e9123d30f459dcf108aaae2d4acb478083bd5076c41cdcb6c7173bf23333ba13"
 }

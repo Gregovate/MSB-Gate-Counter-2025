@@ -68,6 +68,10 @@ def main():
         definitions.update({m[1]: ' '.join(m[2].split()) for m in re.finditer(r'^#define\s+(\w+)\s+(.+)$', source, re.M)})
     # Version is release metadata controlled by the operator, not detector logic.
     expected_definitions = {k: v for k, v in config['defines'].items() if k != 'FWVersion'}
+    # Reviewed .11 wiring-name migration: preserve original baseline evidence.
+    expected_definitions['beamAPin'] = expected_definitions.pop('magSensorPin')
+    expected_definitions['beamBPin'] = expected_definitions.pop('beamSensorPin')
+    expected_definitions['magneticSensorPin'] = '25'
     if definitions != expected_definitions:
         raise SystemExit('FAIL: GPIO, identity, topic or constant macro changed')
     version_source = mask_comments((root / 'src/main.cpp').read_text(encoding="utf-8"))
@@ -93,4 +97,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -1,3 +1,11 @@
+## 25.12.28.0-modular-test.11 — 2026-11-09
+
+- Rename existing GPIO32/33 bindings to beamAPin/beamBPin; introduce magneticSensorPin on GPIO25.
+- Add diagnostic-only raw magnetic/beam event tracing, beam-confirmation markers, retained MQTT health and bounded current-year SD CSV logging.
+- Report queue loss, offline/export loss and maximum polling gap; do not interpret magnetic polarity or change vehicle counts.
+- Stop the optional legacy beam logger from modifying detector state; label new legacy log headers accurately.
+- Add native timing, overflow, wraparound, exporter fault and unchanged-detector regression checks. See Magnetic_Diagnostics_Release_11.md for installation and field acceptance.
+
 # Release .10 — 2026-11-05
 
 - Retry count restoration after valid RTC time returns; preserve blocked detections separately in NVS.
@@ -267,5 +275,3 @@
 ---
 
 For more information, see the [README.md](README.md) file.
-
-

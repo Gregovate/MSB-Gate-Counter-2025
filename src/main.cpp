@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.11 — 2026-11-09
+ *   - Name GPIO32/33 as Beam A/B; add GPIO25 magnetic diagnostics only.
+ *   - Trace raw levels and beam confirmations to MQTT/current-year SD with loss metrics.
  * 25.12.28.0-modular-test.10 — 2026-11-05
  *   - Coordinate persisted HA schedules/tuning with both counter releases.
  *   - Separate official show buckets from uninterrupted all-day traffic.
@@ -59,9 +62,10 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.10";
+const char FWVersion[] = "25.12.28.0-modular-test.11";
 
 #include "traffic/Firmware.h"
+#include "traffic/MagneticDiagnostics.h"
 
 void setup() {
     Serial.begin(115200);
@@ -140,17 +144,19 @@ void setup() {
     publishMQTT(MQTT_PUB_BEAM_A_STATE, String(beamAState), true);
     publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);
 
-    // Both beams via optocouplers: HIGH = clear, LOW = broken 25-11-20 GAL
-    pinMode(magSensorPin, INPUT);      // Beam A
-    pinMode(beamSensorPin, INPUT);     // Beam B
+    // Existing verified detector polarity: raw HIGH = broken, LOW = clear.
+    pinMode(beamAPin, INPUT);      // Beam A
+    pinMode(beamBPin, INPUT);     // Beam B
+
+    initializeMagneticDiagnostics();
 
     delay(5); // tiny settle time
 
     // Read raw beam levels
-    int rawA = digitalRead(magSensorPin);
-    int rawB = digitalRead(beamSensorPin);
+    int rawA = digitalRead(beamAPin);
+    int rawB = digitalRead(beamBPin);
 
-    // Map to logical: 1=blocked, 0=clear (2025 normally HIGH beams)
+    // Map to logical: 1=blocked, 0=clear.
     beamAState  = (rawA == HIGH) ? 1 : 0;
     beamBState = (rawB == HIGH) ? 1 : 0;
 
@@ -209,7 +215,7 @@ void setup() {
     checkAndCreateFile(fileName7, "Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
     checkAndCreateFile(fileName8);
     checkAndCreateFile(fileName9);
-    checkAndCreateFile(fileName10, "ms,Beam,mag");
+    checkAndCreateFile(fileName10, "ms,beamB_raw,beamA_raw");
 
     // Required Hourly Data Files
     createAndInitializeHourlyFile(fileName5);
@@ -254,6 +260,7 @@ void loop() {
     timeTriggeredEvents();    // Various functions/saves/resets based on time of day
 
     detectCar();              // Detect cars
+    serviceMagneticDiagnostics(); // Bounded diagnostic export after counting
 
     // Keep MQTT client alive and publish heartbeat on its own clock
     if (millis() - lastKeepAliveMillis >= (unsigned long)mqttKeepAlive * 1000UL) {
@@ -261,4 +268,3 @@ void loop() {
         lastKeepAliveMillis = millis();
     }
 }
-
