@@ -23,6 +23,7 @@ inline int year=2026, pins[40]{}, configuredPin=-1, configuredMode=-1;
 inline size_t fakeSize=0;
 inline std::string logBytes, lastPath;
 inline std::vector<std::string> published;
+inline std::map<std::string,std::string> sensorStates;
 inline uint32_t millis(){return clockMs;}
 inline bool countsReady(){return ready;}
 inline int recordingYear(){return year;}
@@ -38,4 +39,4 @@ struct File {
 inline File recordingOpen(const String &p,const char*){lastPath=p;return File{};}
 struct Mqtt { bool publish(const char*,const char* p,bool){published.emplace_back(p);return true;} };
 inline Mqtt mqtt_client;
-inline void publishMQTT(const char*,const String& s,bool){published.push_back(s);}
+inline void publishMQTT(const char* topic,const String& s,bool){published.push_back(s);sensorStates[topic]=s;}

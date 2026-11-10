@@ -65,7 +65,7 @@ Hardware procedure: use Count_Persistence.md. After the agreed firmware update, 
 ## Gate-only magnetic diagnostics (.11)
 
 GPIO25 is diagnostic only; GPIO32/33 remain Beam A/B. New topics:
-`Sensors/magneticRawState` (retained raw 0/1),
+`Sensors/magneticRawState` (retained; from .12: 0 clear / 1 triggered for active-low input; existing topic name retained),
 `Diagnostics/magnetic/event` (non-retained event JSON), and
 `Diagnostics/magnetic/status` (retained loss/sampling/SD status), all beneath
 `msb/traffic/GateCounter/`. No magnetic command or count authority is added.

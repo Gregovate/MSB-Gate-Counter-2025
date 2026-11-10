@@ -46,8 +46,9 @@ void serviceMagneticDiagnostics() {
         "{\"bootId\":%lu,\"seq\":%lu,\"ms\":%lu,\"kind\":%u,\"beamARaw\":%u,\"beamBRaw\":%u,\"magRaw\":%u,\"magLevelMs\":%lu}",
         (unsigned long)magneticBootId,(unsigned long)e.sequence,(unsigned long)e.ms,
         unsigned(e.kind),unsigned(e.a),unsigned(e.b),unsigned(e.mag),(unsigned long)e.magLevelMs);
+    // Preserve the existing topic; invert only its displayed sensor state.
     if (mqttOnline())
-        publishMQTT("msb/traffic/GateCounter/Sensors/magneticRawState",String(int(magneticTrace.mag)),true);
+        publishMQTT("msb/traffic/GateCounter/Sensors/magneticRawState",String(int(!magneticTrace.mag)),true);
     // Never enqueue old diagnostic traffic for reconnect replay.
     if (!mqttOnline() || !mqtt_client.publish(magneticEventTopic,payload,false)) ++magneticMqttLost;
 
@@ -75,8 +76,9 @@ void serviceMagneticDiagnostics() {
 
 void publishMagneticDiagnostics() {
     if (!magneticTrace.initialized || !mqttOnline()) return;
-    // Retained snapshot is current state; event stream above is non-retained.
-    publishMQTT("msb/traffic/GateCounter/Sensors/magneticRawState",String(int(magneticTrace.mag)),true);
+    // Existing sensor reports active-low detection: 1 triggered, 0 clear.
+    // Raw event/CSV levels remain electrical levels for pulse timing analysis.
+    publishMQTT("msb/traffic/GateCounter/Sensors/magneticRawState",String(int(!magneticTrace.mag)),true);
     char payload[384];
     snprintf(payload,sizeof(payload),
         "{\"mode\":\"DIAGNOSTIC_ONLY\",\"gpio\":25,\"bootId\":%lu,\"transitions\":%lu,\"queueDropped\":%lu,\"sdLost\":%lu,\"mqttLost\":%lu,\"maxSampleGapMs\":%lu,\"sd\":\"%s\"}",

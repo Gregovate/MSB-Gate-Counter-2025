@@ -1,3 +1,5 @@
+> Update in .12: the existing `Sensors/magneticRawState` is inverted to 0 clear / 1 triggered. No new sensor is introduced. Raw event `magRaw` and CSV levels remain electrical values (LOW = triggered). Beam polarity is unchanged. This corrects display polarity only; movement pulses/bouncing remain visible and are not vehicle counts. The instructions below describe the original .11 raw trace release.
+
 # Gate magnetic diagnostics — release .11
 
 Date: 2026-11-09. Firmware: `25.12.28.0-modular-test.11`.

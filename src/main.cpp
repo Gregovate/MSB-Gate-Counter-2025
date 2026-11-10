@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.12 — 2026-11-10
+ *   - Invert existing magneticRawState: LOW input reports 1 (triggered).
+ *   - Preserve raw diagnostic traces and beam behavior; no new sensor.
  * 25.12.28.0-modular-test.11 — 2026-11-09
  *   - Name GPIO32/33 as Beam A/B; add GPIO25 magnetic diagnostics only.
  *   - Trace raw levels and beam confirmations to MQTT/current-year SD with loss metrics.
@@ -62,7 +65,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.11";
+const char FWVersion[] = "25.12.28.0-modular-test.12";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"

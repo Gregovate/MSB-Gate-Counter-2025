@@ -1,3 +1,9 @@
+## 25.12.28.0-modular-test.12 — 2026-11-10
+
+- Field-confirmed magnetic input is active-low. Invert the existing `Sensors/magneticRawState` value: 0 clear, 1 triggered. No additional sensor or topic.
+- Apply the same polarity on event export and heartbeat; leave raw event/CSV electrical levels and beam polarity unchanged. No debounce or magnetic vehicle counting added.
+- Native regression checks cover HIGH/LOW reporting through both publication paths and unchanged raw storage. Target build and field test remain required.
+
 ## 25.12.28.0-modular-test.11 — 2026-11-09
 
 - Rename existing GPIO32/33 bindings to beamAPin/beamBPin; introduce magneticSensorPin on GPIO25.
