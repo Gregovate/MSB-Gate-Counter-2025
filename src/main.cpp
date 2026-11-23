@@ -8,6 +8,10 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.13 — 2026-11-22
+ *   - Preserve occupied/long passages; publish counts before SD verification.
+ *   - Poll beams before and between foreground maintenance operations.
+ *   - Correct Gate spacing log and both-clear rearming; preserve checkpoints.
  * 25.12.28.0-modular-test.12 — 2026-11-10
  *   - Invert existing magneticRawState: LOW input reports 1 (triggered).
  *   - Preserve raw diagnostic traces and beam behavior; no new sensor.
@@ -65,7 +69,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.12";
+const char FWVersion[] = "25.12.28.0-modular-test.13";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
@@ -243,24 +247,30 @@ void setup() {
 }
 
 void loop() {
+    detectCar(); // Beam sampling precedes all foreground maintenance.
     updateRecordingCalendar();
     // Retry durable saves and roll full dates even when no vehicle arrives.
     serviceCountState();
+    detectCar();
     DateTime now = rtc.now();
 
     currentTimeMinute = now.hour()*60 + now.minute(); // convert time to minutes since midnight
 
     showTime = officialShowNow();
 
-    readTempandRH();          // Get Temperature and Humidity
+    readTempandRH(); // Get Temperature and Humidity
+    detectCar();
 
     ElegantOTA.loop();        // Keep OTA Updates Alive
 
-    updateDisplay();          // Update the display
+    updateDisplay();
+    detectCar();
 
-    checkWiFiConnection();    // Check and maintain WiFi connection
+    checkWiFiConnection();
+    detectCar();
 
-    timeTriggeredEvents();    // Various functions/saves/resets based on time of day
+    timeTriggeredEvents();
+    detectCar();
 
     detectCar();              // Detect cars
     serviceMagneticDiagnostics(); // Bounded diagnostic export after counting

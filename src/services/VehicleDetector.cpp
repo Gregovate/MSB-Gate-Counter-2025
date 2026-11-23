@@ -67,13 +67,12 @@ void countTheCar() {
     // increase Show Count only when show is open
     recordOfficialVehicle();
 
-    // Commit this vehicle as one dated daily/show/hourly checkpoint before
-    // MQTT or the web-facing files can delay persistence.
-    persistCountState();
-    // Reporting continues if SD fails; countPersistence identifies durability.
+    // Publish the accepted RAM count immediately. SD durability is reported
+    // separately; a publication does not claim checkpoint success.
     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
+    persistCountState(); // Retain per-vehicle verified reboot recovery.
     saveDailyTotal();
     saveShowTotal();
     saveHourlyCounts();
@@ -297,7 +296,14 @@ void detectCar() {
                 publishMQTT(MQTT_PUB_BEAM_B_BROKEN_MS, String(brokenDuration));
 
                 if (brokenDuration >= carDetectMS) {
-                    gateDetectState = CAR_DETECTED;
+                    timeToPassMS = currentMillis - beamATripTime_ms;
+                    timeBetweenCars_ms = lastCarDetected_ms ? currentMillis-lastCarDetected_ms : 0;
+                    lastCarDetected_ms = currentMillis;
+                    publishMQTT(MQTT_PUB_TTP,String(timeToPassMS),true);
+                    publishMQTT(MQTT_PUB_BETWEENCARS_MS,String(timeBetweenCars_ms),true);
+                    markMagneticBeamVehicle();countTheCar();
+                    carPresentFlag=false;
+                    gateDetectState = aBroken ? CAR_DETECTED : WAITING_FOR_CAR;
                     publishMQTT(MQTT_COUNTER_LOG, "Changed state to Car Detected", false);
                 } else {
                     carPresentFlag = false;
@@ -314,26 +320,9 @@ void detectCar() {
             break;
 
         case CAR_DETECTED:
-            if (carPresentFlag) {
-                // TTP from Beam A broken to Beam B clear
-                timeToPassMS = currentMillis - beamATripTime_ms;
-                publishMQTT(MQTT_PUB_TTP, String(timeToPassMS));
-                publishMQTT(MQTT_COUNTER_LOG, "Car confirmed and counted!");
-
-                markMagneticBeamVehicle();
-                countTheCar();
-
-                // Between cars
-                if (lastCarDetected_ms > 0) {
-                    timeBetweenCars_ms = currentMillis - lastCarDetected_ms;
-                    publishMQTT(MQTT_PUB_BETWEENCARS_MS, String(timeBetweenCars_ms), true);
-                }
-                lastCarDetected_ms = currentMillis;
-
-                carPresentFlag = false;
-                gateDetectState = WAITING_FOR_CAR;
-                publishMQTT(MQTT_COUNTER_LOG, "System ready for next car.");
-            }
+            // A residual blocked beam belongs to the completed vehicle. There
+            // is no cooldown; the next passage arms as soon as BOTH are clear.
+            if (!aBroken && !bBroken) gateDetectState = WAITING_FOR_CAR;
             break;
     }
 }
