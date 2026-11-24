@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.24 — 2026-11-24
+ *   - Archive the test season on the accepted date change, qualify passages by HA window,
+ *     report dated occupancy and carry forward HA weather-closure day adjustments.
  * 25.12.28.0-modular-test.23 — 2026-11-24
  *   - Normalize String/char-array season paths before shared status formatting.
  *   - Remove unused Arduino-DS3231 dependency; retain RTClib RTC driver.
@@ -104,7 +107,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.23";
+const char FWVersion[] = "25.12.28.0-modular-test.24";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
@@ -114,6 +117,7 @@ void setup() {
     pinMode(beamAPin, INPUT_PULLDOWN);pinMode(beamBPin, INPUT_PULLDOWN);
     initializeBeamCapture(beamAPin,beamBPin);
     initializeTrafficJournal();
+    initializeProductionSession();
     ElegantOTA.setAutoReboot(true);
     ElegantOTA.setFilesystemMode(false); // Internal data contains the traffic journal; firmware OTA remains enabled.
     Serial.println("Starting Gate Counter...");
@@ -319,6 +323,7 @@ void loop() {
         KeepMqttAlive();
         lastKeepAliveMillis = millis();
     }
+    serviceProductionSession();
     serviceTrafficJournal();
     detectCar();
 }

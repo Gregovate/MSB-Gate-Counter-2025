@@ -203,7 +203,8 @@ void renameSDFile(AsyncWebServerRequest *request) {
 
 void setupServer() {
     // Serve HTML file
-    setupFileManagerRoutes(); // Shared flash-backed UI and recovery status.
+    setupFileManagerRoutes();
+    setupOccupancyRoutes(); // Shared flash-backed UI and recovery status.
 
 
     // ----------------------------

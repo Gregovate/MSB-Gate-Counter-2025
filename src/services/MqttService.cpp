@@ -1,8 +1,14 @@
 #include "traffic/Firmware.h"
+#include "traffic/DatedOccupancy.h"
 #include "traffic/MagneticDiagnostics.h"
 
-// Extracted from the production baseline; behavior fixes are separate changes.
 
+namespace { traffic::EntranceReading lastEntrance; }
+String occupancyText() {
+    if(!productionActive())return String(carCounterCars-totalDailyCars);
+    if(!mqttOnline() || !lastEntrance.fresh(officialCountDate(),rtc.now().unixtime()))return "unknown";
+    return String(static_cast<int>(lastEntrance.passages)-officialDailyPassages());
+}
 
 void publishMQTT(const char *topic, const String &message, bool retainFlag) {
     if (!countTopicPublishable(topic) || !mqttOnline()) return;
@@ -38,7 +44,7 @@ void KeepMqttAlive() {
         String("{\"boot\":\"") + bootTimestamp +
         "\",\"now\":\"" + getRtcTimestamp() +
         "\",\"exit\":" + totalDailyCars +
-        ",\"inpark\":" + inParkCars +
+        ",\"inpark\":" + (occupancyText()=="unknown" ? String("null") : occupancyText()) +
         ",\"rssi\":" + WiFi.RSSI() +
         "}",
         true
@@ -48,7 +54,7 @@ void KeepMqttAlive() {
 
     // ---- Retained core counts ----
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+    publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
     publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);  // if you want it retained too
 
     // ---- WiFi diagnostics (retained, NEW TREE topics) ----
@@ -84,7 +90,7 @@ void debugInPark(const char* reason) {
     String msg = String(reason) +
                  " Enter=" + String(carCounterCars) +
                  " Exit="  + String(totalDailyCars) +
-                 " InPark=" + String(inParkCars);
+                 " InPark=" + occupancyText();
     publishMQTT(MQTT_DEBUG_LOG, msg);
 }
 
@@ -94,7 +100,7 @@ bool topicIs(const char* t, const char* target) {
 
 void publishStateExitInPark() {
   publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-  publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+  publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
 }
 
 void publishTimingConfig() {
@@ -120,10 +126,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if (strlen(message)!=length) return;
     if (handleOperatingCommand(topic,message)) return;
     String command(topic);
-    if (command==String(topic_base_path)+"/Config/showStartDate") {
+    if(command==String(topic_base_path)+"/Config/resetDaysRunning") {
+        if(acceptDaysRunning(message))flagDailyShowSummarySaved=false;
+        return;
+    }
+    if (command==MQTT_SUB_CC_SHOW_START_DATE || command==String(topic_base_path)+"/Config/showStartDate") {
         acceptShowStartDate(String(message));return;
     }
+    if(command=="msb/traffic/CarCounter/Calendar/daysRunningAnchor") {
+        unsigned long season=0,anchor=0;char extra=0;
+        if(sscanf(message,"%lu,%lu%c",&season,&anchor,&extra)==2 &&
+           applyDaysAnchor(season,anchor))flagDailyShowSummarySaved=false;
+        return;
+    }
+    if(command==traffic::datedEntryTopic) {
+        if(lastEntrance.accept(message,officialCountDate(),rtc.now().unixtime()))publishStateExitInPark();
+        return;
+    }
     if (topicIs(topic,MQTT_SUB_CC_ENTER_TOTAL)) {
+        if(productionActive())return;
         uint32_t count=0;if (!parseCountCorrection(message,count)) return;
         carCounterCars=count;inParkCars=carCounterCars-totalDailyCars;
         publishStateExitInPark();return;

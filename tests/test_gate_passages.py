@@ -17,6 +17,7 @@ class GatePassages(unittest.TestCase):
 struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}String(unsigned long n):std::string(std::to_string(n)){}String(int n):std::string(std::to_string(n)){}};
 unsigned long ticks=0;unsigned long millis(){return ticks;}
 int pins[40]{};int digitalRead(int p){return pins[p];}
+bool productionActive(){return false;}bool productionBlocked(){return false;}bool officialShowNow(){return false;}
 bool loggingEnabled=false,stableRawA=false,stableRawB=false,gateStuckAlarmActive=false,abTimeoutLogged=false,carPresentFlag=false;
 int beamAPin=32,beamBPin=33,beamAState=0,beamBState=0,lastBeamAState=0,lastBeamBState=0,totalDailyCars=0;
 unsigned long lastRawAChangeMs=0,lastRawBChangeMs=0,debounceDelay=50,firstBeamHealth_ms=0,secondBeamHealth_ms=0,gateCounterTimeout=60000,beamATripTime_ms=0,minActivationDuration=100,bothBeamsBroken_ms=0,maxABFollow_ms=5000,carDetectMS=500,lastCarDetected_ms=0,timeToPassMS=0,abFollow_ms=0,timeBetweenCars_ms=0,loggedBetween=0;

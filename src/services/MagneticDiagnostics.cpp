@@ -24,13 +24,23 @@ void initializeMagneticDiagnostics() {
 void sampleMagneticDiagnostics(bool beamARaw, bool beamBRaw) {
     // Poll beside the detector's raw beam reads, before any MQTT/SD work.
     // A zero year means recovery was not ready: no dated SD write is allowed.
-    magneticTrace.sample(millis(),countsReady()?recordingYear():0,
-                         beamARaw,beamBRaw,digitalRead(magneticSensorPin));
+    const bool magnetic=digitalRead(magneticSensorPin);
+    const bool changed=!magneticTrace.initialized || magneticTrace.a!=beamARaw ||
+        magneticTrace.b!=beamBRaw || magneticTrace.mag!=magnetic;
+    // Only consult the RTC on a transition, never on every beam polling pass.
+    uint32_t year=changed && countsReady()?recordingYear():0;
+    const bool production=productionActive();
+    if(year && production && !officialShowNow())year=0;
+    magneticTrace.sample(millis(),year,
+                         beamARaw,beamBRaw,magnetic,production);
 }
 
 void markMagneticBeamVehicle() {
     // This is an observation of an existing beam decision, NOT another count.
-    magneticTrace.push(millis(),countsReady()?recordingYear():0,2);
+    uint32_t year=countsReady()?recordingYear():0;
+    const bool production=productionActive();
+    if(year && production && !officialShowNow())year=0;
+    magneticTrace.push(millis(),year,2,production);
 }
 
 void serviceMagneticDiagnostics() {
@@ -52,6 +62,7 @@ void serviceMagneticDiagnostics() {
     // Never enqueue old diagnostic traffic for reconnect replay.
     if (!mqttOnline() || !mqtt_client.publish(magneticEventTopic,payload,false)) ++magneticMqttLost;
 
+    if(productionActive() && (!e.production || !e.year)){magneticSdHealth="OUTSIDE_PRODUCTION_WINDOW";return;}
     if (!e.year || e.year!=uint32_t(recordingYear()) || !countsReady()) {
         magneticSdHealth="CLOCK_OR_RECOVERY_NOT_READY"; ++magneticSdLost; return;
     }

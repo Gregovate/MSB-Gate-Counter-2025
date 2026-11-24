@@ -40,3 +40,5 @@ inline File recordingOpen(const String &p,const char*){lastPath=p;return File{};
 struct Mqtt { bool publish(const char*,const char* p,bool){published.emplace_back(p);return true;} };
 inline Mqtt mqtt_client;
 inline void publishMQTT(const char* topic,const String& s,bool){published.push_back(s);sensorStates[topic]=s;}
+inline bool productionActive(){return false;}
+inline bool officialShowNow(){return false;}

@@ -6,6 +6,7 @@ namespace traffic {
 // assumed magnetic polarity or debounce; calibration requires seeing chatter.
 struct MagneticEvent {
     uint32_t sequence, ms, magLevelMs, year;
+    bool production;
     uint8_t a, b, mag, kind; // kind: 0 initial, 1 transition, 2 beam vehicle
 };
 struct MagneticTrace {
@@ -15,18 +16,18 @@ struct MagneticTrace {
     uint8_t head=0, size=0;
     bool initialized=false, a=false, b=false, mag=false;
 
-    void push(uint32_t ms, uint32_t year, uint8_t kind) {
-        MagneticEvent e{++sequence, ms, uint32_t(ms-magSince), year,
+    void push(uint32_t ms, uint32_t year, uint8_t kind,bool production=false) {
+        MagneticEvent e{++sequence, ms, uint32_t(ms-magSince), year, production,
                         uint8_t(a),uint8_t(b),uint8_t(mag),kind};
         if (size==64) { ++dropped; return; }
         queue[(head+size)%64]=e;
         ++size;
     }
-    void sample(uint32_t ms, uint32_t year, bool ar, bool br, bool mr) {
+    void sample(uint32_t ms, uint32_t year, bool ar, bool br, bool mr,bool production=false) {
         if (!initialized) {
             initialized=true; a=ar; b=br; mag=mr;
             lastSample=magSince=ms;
-            push(ms,year,0); return;
+            push(ms,year,0,production); return;
         }
         const uint32_t gap=ms-lastSample;
         if (gap>maxGapMs) maxGapMs=gap;
@@ -35,7 +36,7 @@ struct MagneticTrace {
         const bool magChanged=mag!=mr;
         a=ar; b=br; mag=mr;
         // On magnetic transition magLevelMs describes the PREVIOUS level.
-        push(ms,year,1);
+        push(ms,year,1,production);
         if (magChanged) { ++transitions; magSince=ms; }
     }
     bool pop(MagneticEvent &e) {

@@ -1,4 +1,5 @@
 #include "traffic/Firmware.h"
+#include "traffic/DatedOccupancy.h"
 #include "secrets.h"
 
 // Extracted from the production baseline; behavior fixes are separate changes.
@@ -93,7 +94,7 @@ void MQTTreconnect() {
 
                 // retained core counts
                 publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-                publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+                publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
 
                 // ===== WiFi telemetry (retained) =====
                 publishMQTT(MQTT_PUB_WIFI_SSID, WiFi.SSID(), true);
@@ -111,17 +112,19 @@ void MQTTreconnect() {
 
                 // Subscribe to necessary topics (NEW TREE)
                 mqtt_client.subscribe(MQTT_SUB_CC_ENTER_TOTAL);
+                mqtt_client.subscribe(traffic::datedEntryTopic);
                 mqtt_client.subscribe(MQTT_SUB_CC_SHOW_TOTAL);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAILY);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_SHOW);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DOM);
-                mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAYS);
+                if(mqtt_client.publish(MQTT_SUB_GATE_RESET_DAYS,"",true))mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAYS);
                 mqtt_client.subscribe(MQTT_SUB_GATE_TIMEOUT);
                 mqtt_client.subscribe(MQTT_SUB_CARMS);
                 mqtt_client.subscribe(MQTT_SUB_LOGGING);
                 mqtt_client.subscribe(MQTT_SUB_CC_SHOW_START_DATE);
                 mqtt_client.subscribe(MQTT_SUB_CC_DAY_OF_MONTH);
                 mqtt_client.subscribe(MQTT_SUB_CC_DAYS_RUNNING);
+                mqtt_client.subscribe("msb/traffic/CarCounter/Calendar/daysRunningAnchor");
 
 
                 mqtt_client.subscribe((String(topic_base_path)+"/Config/operatingSettings").c_str());

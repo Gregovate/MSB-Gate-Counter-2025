@@ -44,7 +44,7 @@ void updateDisplay() {
     //Line 5: In Park Cars
     display.setTextSize(1);
     display.setCursor(0, line5);
-    display.printf("InPark: %d", carCounterCars - totalDailyCars);
+    display.printf("InPark: %s", occupancyText().c_str());
 
     // A normal redraw must never erase a live storage warning.
     if (!sdAvailable) {

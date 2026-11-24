@@ -9,3 +9,4 @@ bool topicIs(const char* t, const char* target);
 void publishStateExitInPark();
 void publishTimingConfig();
 void callback(char* topic, byte* payload, unsigned int length);
+String occupancyText();

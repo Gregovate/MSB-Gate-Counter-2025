@@ -3,7 +3,7 @@
 
 // Extracted from the production baseline; behavior fixes are separate changes.
 void logSensorStates() {
-    if (!loggingEnabled) return; // Do not log if logging is disabled
+    if (!loggingEnabled || productionBlocked() || (productionActive() && !officialShowNow())) return; // Do not log if logging is disabled
 
     static unsigned long lastLogTime = 0; // Prevent excessive logging
     unsigned long currentTime = millis();
@@ -32,6 +32,12 @@ void logSensorStates() {
 void countTheCar() {
     serviceCountState(); // Captured event date owns rollover, even after a stall.
     serviceEventReset(); // Apply an armed logical reset before this event increments.
+    // Leave beam timing and stuck-beam detection running through closed periods.
+    if (productionBlocked() || (!productionActive() && productionDateMatches()))return;
+    if (productionActive()) {
+        if (!countEventClockValid()){noteUnqualifiedClock();return;}
+        if (!officialShowNow())return;
+    }
     activateTrafficVehicleEvent();
     if (!countEventCanApply()) {
         // Preserve events during recovery without writing zero/fictitious dates.
@@ -78,7 +84,7 @@ void countTheCar() {
     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
-    publishMQTT(MQTT_PUB_INPARK_CARS,String(inParkCars),true);
+    publishMQTT(MQTT_PUB_INPARK_CARS,occupancyText(),true);
     publishMQTT(MQTT_PUB_TIME,timeBuf);
     persistCountState(); // SD projection follows immediate current-state publication.
     saveDailyTotal();
@@ -103,7 +109,7 @@ void countTheCar() {
         myFile.print(", ");
 
         // InParkCars
-        myFile.print(inParkCars);
+        myFile.print(occupancyText());
         myFile.print(", ");
 
         // AB_Follow_ms (A -> B follow time)
@@ -119,7 +125,7 @@ void countTheCar() {
         publishMQTT(MQTT_PUB_TIME, timeBuf);  // use the same timestamp string
 
         publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-        publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+        publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
         publishMQTT(MQTT_PUB_SHOWTOTAL,   String(totalShowCars),  true);
 
         publishMQTT(MQTT_PUB_BEAM_B_STATE, String(beamBState), true);

@@ -83,7 +83,7 @@ void getDailyTotal() {
 
         // GAL 25-11-24: retained state publishes
         publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-        publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+        publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
 
     } else {
         Serial.print("SD Card: Cannot open the file: ");
@@ -235,7 +235,7 @@ void saveDailyTotal() {
 
     // GAL 25-11-24: Retained state publishes
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
-    publishMQTT(MQTT_PUB_INPARK_CARS, String(inParkCars),     true);
+    publishMQTT(MQTT_PUB_INPARK_CARS, occupancyText(),     true);
 }
 
 void saveShowTotal() {
@@ -473,6 +473,7 @@ void initSDCard() {
 
   Serial.printf("SD Card Size: %lluMB\n", cardSize);
   Serial.println(F("SD CARD INITIALIZED."));
+  if(!productionCardMatches()){sdAvailable=false;return;}
   loadRecordingCalendarFromSD();
   display.clearDisplay();
   display.setTextSize(1);
@@ -510,8 +511,10 @@ void checkSdHealth() {
             publishMQTT((String(topic_base_path)+"/System/sd/health").c_str(), "OFFLINE", true);
             return;
         }
+        if(!productionCardMatches()){sdAvailable=false;return;}
         ensureSeasonFolderExists(recordingYear()); // Never replaces already restored live totals.
     }
+    if(!productionCardMatches()){sdAvailable=false;return;}
     File test=recordingOpen("/_sd_test.tmp",FILE_WRITE);
     size_t written=test ? test.print("1") : 0;
     test.flush(); test.close();
