@@ -1,6 +1,7 @@
 #include "traffic/Firmware.h"
+#include "traffic/DhtCompatibility.h"
 
-// Shared implementation: keep identical in both projects (verify_modular.py).
+// Gate sampling schedule is retained; encoding helper is shared with Car.
 void readTempandRH() {
     // --- Non-blocking warmup and timing state (function-local statics) ---
     static bool dhtWarmupDone = false;
@@ -37,6 +38,15 @@ void readTempandRH() {
     // Read temperature and humidity
     humidity = dht.readHumidity();
     tempF   = dht.readTemperature(true); // Read Fahrenheit directly
+    const float decodedF=tempF;
+    bool encodingCorrected=false;
+    tempF=traffic::compatibleDht22F(decodedF,encodingCorrected);
+    char diagnostic[192];
+    snprintf(diagnostic,sizeof(diagnostic),
+        "{\"lastReadTempF\":%.2f,\"lastReadHumidity\":%.1f,\"encoding\":\"%s\"}",
+        isfinite(decodedF)?decodedF:-999.f,isfinite(humidity)?humidity:-999.f,
+        encodingCorrected?"TWOS_COMPLEMENT_COMPAT":"STANDARD");
+    publishMQTT((String(topic_base_path)+"/System/dhtHealth").c_str(),String(diagnostic),true);
 
     // Check if the readings are valid
     if (isnan(tempF) || isnan(humidity)) {

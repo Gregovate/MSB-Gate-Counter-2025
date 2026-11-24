@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.16 — 2026-11-23
+ *   - Decode bounded DHT22 two's-complement negative-temperature variants.
+ *   - Preserve raw diagnostics, standard encoding, counting and journal paths.
  * 25.12.28.0-modular-test.15 — 2026-11-23
  *   - Commit vehicle/reset/correction snapshots to OTA-preserving flash journal.
  *   - Restore without SD; archive immutable timing records with verified bank reuse.
@@ -77,7 +80,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.15";
+const char FWVersion[] = "25.12.28.0-modular-test.16";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
