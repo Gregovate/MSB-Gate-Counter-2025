@@ -98,7 +98,7 @@ bool flagHourlyReset = false;
 bool showTime = false;
 bool resetFlagsOnce = false;
 File myFile; // global handle for SD file ops
-String seasonFolder = ""; // Example: "/GC/2025"
+SeasonFolder seasonFolder = ""; // Example: "/GC/2025"
 String fileName1; // ExitTotal.txt       (daily total)
 String fileName2; // ShowTotal.txt       (season total)
 String fileName3; // DayOfMonth.txt

@@ -8,6 +8,10 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.23 — 2026-11-24
+ *   - Normalize String/char-array season paths before shared status formatting.
+ *   - Remove unused Arduino-DS3231 dependency; retain RTClib RTC driver.
+ *   - Expand Gate date buffers to eliminate truncation warnings.
  * 25.12.28.0-modular-test.22 — 2026-11-24
  *   - Retain completed hourly temperatures and replay them on MQTT reconnect.
  *   - Date each hourly slot; preserve the last 24 completed hours across midnight.
@@ -100,7 +104,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.22";
+const char FWVersion[] = "25.12.28.0-modular-test.23";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"

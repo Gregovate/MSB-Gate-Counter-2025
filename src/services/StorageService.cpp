@@ -4,7 +4,7 @@ bool sdAvailable=false;
 
 // Extracted from the production baseline; behavior fixes are separate changes.
 String sPath(const char *fname) {
-    return seasonFolder + "/" + String(fname);
+    return String(seasonFolder) + "/" + String(fname);
 }
 
 void ensureSeasonFolderExists(int seasonYear) {
@@ -28,7 +28,7 @@ void initSeasonalPaths() {
 
     ensureSeasonFolderExists(seasonYear);
 
-    seasonFolder = "/GC/" + String(seasonYear);
+    snprintf(seasonFolder,sizeof(seasonFolder),"/GC/%04d",seasonYear);
 
     // Assign full seasonal paths
     fileName1 = sPath("DAILYTOT.txt");
@@ -40,7 +40,7 @@ void initSeasonalPaths() {
     fileName7 = sPath("ShowSummary.csv");
     fileNameShowStart = sPath("ShowStart.txt");
 
-    Serial.printf("Season folder set to: %s\n", seasonFolder.c_str());
+    Serial.printf("Season folder set to: %s\n", seasonFolder);
         // ---- MQTT visibility for headless debugging ----
     publishMQTT(MQTT_PUB_SEASON_YEAR,   String(seasonYear), true);
     publishMQTT(MQTT_PUB_SEASON_FOLDER, seasonFolder,      true);
@@ -488,9 +488,9 @@ void initSDCard() {
 void applyRecordingCalendar() {
     DateTime start=recordingShowStart();
     showStartYear=start.year(); showStartMonth=start.month(); showStartDay=start.day();
-    char date[11]; snprintf(date,sizeof(date),"%04d-%02d-%02d",showStartYear,showStartMonth,showStartDay);
+    /* Full RTC component ranges fit without truncation. */ char date[24]; snprintf(date,sizeof(date),"%04d-%02d-%02d",showStartYear,showStartMonth,showStartDay);
     showStartDate=String(date); showStartDateValid=true;
-    if (SD.cardType()==CARD_NONE) { seasonFolder="/GC/"+String(recordingYear()); return; }
+    if (SD.cardType()==CARD_NONE) { snprintf(seasonFolder,sizeof(seasonFolder),"/GC/%04d",recordingYear()); return; }
     initSeasonalPaths();
     checkAndCreateFile(fileName1);
     checkAndCreateFile(fileName2);

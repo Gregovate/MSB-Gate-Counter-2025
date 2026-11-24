@@ -1,8 +1,7 @@
 {
-  "src/services/RecordingCalendar.cpp": "933eceefeb915fcef54296a99fed83641e9e6b3e6d2df1f291a6441680f189d1",
   "tests/count_stubs/traffic/Firmware.h": "8cb99b42450d5f41c466c1d6aced0b14b3e2c5e7289a90de3d32e3e8834fe62a",
   "include/traffic/OperatingPolicy.h": "0633a727818e14f6e4f722447c92a963ce3d88a57cd80faa8ba7e47acedecdc9",
-  "src/services/OperatingSettings.cpp": "180c48e6d40aec2e03ea3d3f540e0c80f087854fcd2e125ae7dfe85268b5a8d3",
+  "src/services/OperatingSettings.cpp": "7df1cc7936c98956fa3939d4067243b67317a6fcb748c4bdf8be1b98aad81b1e",
   "tests/operating_release_test.cpp": "0ac6c05d9899681234a6d18a819bfa0f04ff0f9b05c6ff666472efeb7447c1be",
   "docs/DHT_Compatibility_20261123.md": "41b87c59bedf2239182d2108ff061bba2532d28af3f8b0d40fd2e58dc90af9ae"
 }
