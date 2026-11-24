@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.18 — 2026-11-23
+ *   - Standardize primary environment topics to Env/temp and hourly/HH.
+ *   - Mirror legacy Gate temperature topics for existing HA subscriptions.
  * 25.12.28.0-modular-test.17 — 2026-11-23
  *   - Share identical DHT, environment averaging and show-summary modules.
  *   - Unify health schema, unavailable samples and reconnect/periodic publication.
@@ -83,7 +86,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.17";
+const char FWVersion[] = "25.12.28.0-modular-test.18";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"

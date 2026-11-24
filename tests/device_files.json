@@ -1,6 +1,6 @@
 {
   "src/services/RecordingCalendar.cpp": "933eceefeb915fcef54296a99fed83641e9e6b3e6d2df1f291a6441680f189d1",
-  "tests/count_stubs/traffic/Firmware.h": "a9806f46095629cc1c1b30a0da880b522da93eb600a8d5a490880fd64b03de70",
+  "tests/count_stubs/traffic/Firmware.h": "8cb99b42450d5f41c466c1d6aced0b14b3e2c5e7289a90de3d32e3e8834fe62a",
   "include/traffic/OperatingPolicy.h": "0633a727818e14f6e4f722447c92a963ce3d88a57cd80faa8ba7e47acedecdc9",
   "src/services/OperatingSettings.cpp": "180c48e6d40aec2e03ea3d3f540e0c80f087854fcd2e125ae7dfe85268b5a8d3",
   "tests/operating_release_test.cpp": "0ac6c05d9899681234a6d18a819bfa0f04ff0f9b05c6ff666472efeb7447c1be",
