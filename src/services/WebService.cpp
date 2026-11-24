@@ -9,55 +9,6 @@
 
 
 
-void listSDFiles(AsyncWebServerRequest *request) {
-
-    // Header line so the UI output is self-explanatory
-    String fileList = "Files in " + currentDirectory + ":\n";
-    fileList += "Name\tSize (bytes)\tLast Write\n";
-
-    File root = recordingOpen(currentDirectory);
-    if (!root || !root.isDirectory()) {
-        request->send(500, "text/plain", "Failed to open directory: " + currentDirectory);
-        return;
-    }
-
-    while (true) {
-        File file = root.openNextFile();
-        if (!file) {
-            break;  // no more files
-        }
-
-        if (!file.isDirectory()) {
-            // Name
-            fileList += String(file.name());
-            fileList += "\t";
-
-            // Size
-            fileList += String(file.size());
-            fileList += "\t";
-
-            // Last write time (if available and time is set)
-            time_t lw = file.getLastWrite();  // ESP32 SD library usually supports this
-            if (lw > 0) {
-                struct tm *tmstruct = localtime(&lw);
-                char buf[20];
-                // YYYY-MM-DD HH:MM
-                strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", tmstruct);
-                fileList += buf;
-            } else {
-                fileList += "unknown";
-            }
-
-            fileList += "\n";
-        }
-
-        file.close();  // important: close each file before opening the next
-    }
-
-    root.close();
-
-    request->send(200, "text/plain", fileList);
-}
 
 void downloadSDFile(AsyncWebServerRequest *request) {
     if (!request->hasParam("filename")) {
@@ -249,13 +200,8 @@ void renameSDFile(AsyncWebServerRequest *request) {
 
 void setupServer() {
     // Serve HTML file
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        if (!SD.exists("/data/index.html")) {
-            request->send(500, "text/plain", "index.html not found in /data");
-            return;
-        }
-        request->send(SD, "/data/index.html", "text/html");
-    });
+    setupFileManagerRoutes(); // Shared flash-backed UI and recovery status.
+
 
     // ----------------------------
     // Enable Reboot via HTTP
@@ -330,7 +276,7 @@ void setupServer() {
     // ----------------------------
     // File manager / SD routes
     // ----------------------------
-    server.on("/listFiles", HTTP_GET, listSDFiles);
+    // /listFiles is registered by the common file manager.
     server.on("/download", HTTP_GET, downloadSDFile);
 
     // Simple upload page for /uploadToData (so browser GET doesn't 500)
