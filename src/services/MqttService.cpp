@@ -44,11 +44,7 @@ void KeepMqttAlive() {
         true
     );
 
-    // ---- Temp/RH JSON (retained) ----
-    char jsonPayload[100];
-    snprintf(jsonPayload, sizeof(jsonPayload),
-             "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-    publishMQTT(MQTT_PUB_TEMP, String(jsonPayload), true);
+    // Shared environment service owns periodic publication and validity.
 
     // ---- Retained core counts ----
     publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);

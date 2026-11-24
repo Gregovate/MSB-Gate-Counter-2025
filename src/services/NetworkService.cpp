@@ -89,11 +89,7 @@ void MQTTreconnect() {
                 publishMQTT(MQTT_PUB_SEASON_FOLDER, seasonFolder, true);
 
 
-                // publish temp/RH JSON on connect (retained)
-                char jsonPayload[100];
-                snprintf(jsonPayload, sizeof(jsonPayload),
-                        "{\"tempF\": %.1f, \"humidity\": %.1f}", tempF, humidity);
-                publishMQTT(MQTT_PUB_TEMP, String(jsonPayload), true);
+                publishEnvironmentState(); // Same validity-aware reconnect state on both devices.
 
                 // retained core counts
                 publishMQTT(MQTT_PUB_EXIT_CARS,   String(totalDailyCars), true);
