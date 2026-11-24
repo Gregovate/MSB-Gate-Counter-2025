@@ -14,14 +14,14 @@ class MagneticDiagnostics(unittest.TestCase):
                     '-I'+str(ROOT/'tests/magnetic_stubs'),'-I'+str(ROOT/'include'),
                     str(ROOT/'tests'/source),'-o',exe],check=True)
                 subprocess.run([exe],check=True)
-    def test_production_detector_only_renamed_and_observed(self):
+    def test_production_detector_keeps_magnetic_observational(self):
         text=(ROOT/'src/services/VehicleDetector.cpp').read_text()
         normalized=text.replace('beamAPin','magSensorPin').replace('beamBPin','beamSensorPin')
         normalized=normalized.replace('    sampleMagneticDiagnostics(rawA, rawB);','')
         normalized=normalized.replace('                markMagneticBeamVehicle();','')
         hashes=dict(body_hashes(normalized))
-        # .13 changes detector timing/rearming; magnetic service remains observational.
-        expected=json.loads((ROOT/'tests/magnetic_detector_release13.json').read_text())
+        # .15 adds captured-time replay; magnetic service remains observational.
+        expected=json.loads((ROOT/'tests/magnetic_detector_release15.json').read_text())
         for name,value in expected.items():self.assertEqual(hashes[name],value,name)
         service=(ROOT/'src/services/MagneticDiagnostics.cpp').read_text()
         self.assertNotRegex(service,r'\b(countTheCar|persistCountState|recordOfficialVehicle|recordPendingVehicle)\s*\(')

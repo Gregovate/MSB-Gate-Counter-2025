@@ -30,13 +30,15 @@ void logSensorStates() {
 }
 
 void countTheCar() {
-    serviceCountState(); // Network work may have crossed midnight since loop start.
-    if (!countsReady()) {
+    serviceCountState(); // Captured event date owns rollover, even after a stall.
+    serviceEventReset(); // Apply an armed logical reset before this event increments.
+    activateTrafficVehicleEvent();
+    if (!countEventCanApply()) {
         // Preserve events during recovery without writing zero/fictitious dates.
         recordPendingVehicle();
         return;
     }
-    DateTime now = rtc.now();
+    DateTime now = countEventTime();
 
     // Build a fresh timestamp string (do NOT use now.toString(buf2) here)
     char timeBuf[25];
@@ -67,12 +69,18 @@ void countTheCar() {
     // increase Show Count only when show is open
     recordOfficialVehicle();
 
+    commitCountJournal(); // Only internal flash; no SD or network wait here.
+
+    inParkCars = carCounterCars-totalDailyCars;
+
     // Publish the accepted RAM count immediately. SD durability is reported
     // separately; a publication does not claim checkpoint success.
     publishMQTT(MQTT_PUB_EXIT_CARS, String(totalDailyCars), true);
     publishMQTT(MQTT_PUB_SHOWTOTAL, String(totalShowCars), true);
     publishMQTT(hourlyTopic, String(hourlyCount[currentHour]), true);
-    persistCountState(); // Retain per-vehicle verified reboot recovery.
+    publishMQTT(MQTT_PUB_INPARK_CARS,String(inParkCars),true);
+    publishMQTT(MQTT_PUB_TIME,timeBuf);
+    persistCountState(); // SD projection follows immediate current-state publication.
     saveDailyTotal();
     saveShowTotal();
     saveHourlyCounts();
@@ -80,7 +88,7 @@ void countTheCar() {
     inParkCars = carCounterCars - totalDailyCars;
 
     // open file for writing Car Data
-    myFile = recordingOpen(fileName6, FILE_APPEND);
+    myFile = sdAvailable ? recordingOpen(fileName6, FILE_APPEND) : File();
     if (myFile) {
         // DateTime
         myFile.print(timeBuf);
@@ -125,35 +133,13 @@ void countTheCar() {
     }
 }
 
-void detectCar() {
-    unsigned long currentMillis = millis();
-
-    // Raw reads (25.11.21.1 VERIFIED): raw HIGH = broken, raw LOW = clear
-    bool rawA = digitalRead(beamAPin);    // Beam A
-    bool rawB = digitalRead(beamBPin);   // Beam B
-
-    sampleMagneticDiagnostics(rawA, rawB);
-
-    // ---- Debounce Beam A ----
-    if (rawA != stableRawA) {
-        if (currentMillis - lastRawAChangeMs >= debounceDelay) {
-            stableRawA = rawA;
-            lastRawAChangeMs = currentMillis;
-        }
-    } else {
-        lastRawAChangeMs = currentMillis;
-    }
-
-    // ---- Debounce Beam B ----
-    if (rawB != stableRawB) {
-        if (currentMillis - lastRawBChangeMs >= debounceDelay) {
-            stableRawB = rawB;
-            lastRawBChangeMs = currentMillis;
-        }
-    } else {
-        lastRawBChangeMs = currentMillis;
-    }
-
+namespace {uint32_t bothClearAt=0,clearBeforePassage=0;bool wasBothClear=false;}
+void processBeamSample(uint32_t currentMillis,bool rawA,bool rawB) {
+    setCountEventMillis(currentMillis);
+    if(!rawA && !rawB && !wasBothClear)bothClearAt=currentMillis;
+    wasBothClear=!rawA && !rawB;
+    sampleMagneticDiagnostics(rawA,rawB);
+    stableRawA=rawA;stableRawB=rawB;
     // Map to internal + MQTT semantics (unchanged from 25.11.21.1):
     // 1 = broken, 0 = clear
     beamAState = (stableRawA == HIGH) ? 1 : 0;
@@ -218,6 +204,7 @@ void detectCar() {
             // -----------------------------------------
             // Start on Beam A broken while B is still clear
             if (aBroken && !bBroken) {
+                clearBeforePassage=currentMillis-bothClearAt;
                 beamATripTime_ms = currentMillis;
                 gateDetectState  = BEAM_A_HIGH;
 
@@ -301,6 +288,7 @@ void detectCar() {
                     lastCarDetected_ms = currentMillis;
                     publishMQTT(MQTT_PUB_TTP,String(timeToPassMS),true);
                     publishMQTT(MQTT_PUB_BETWEENCARS_MS,String(timeBetweenCars_ms),true);
+                    setTrafficVehicleEvent(currentMillis,timeToPassMS,abFollow_ms,brokenDuration,timeBetweenCars_ms,clearBeforePassage);
                     markMagneticBeamVehicle();countTheCar();
                     carPresentFlag=false;
                     gateDetectState = aBroken ? CAR_DETECTED : WAITING_FOR_CAR;
@@ -326,3 +314,6 @@ void detectCar() {
             break;
     }
 }
+
+void detectCar(){serviceBeamCapture(debounceDelay,processBeamSample);}
+void resetBeamDetectorAfterLoss(){gateDetectState=CAR_DETECTED;carPresentFlag=false;}

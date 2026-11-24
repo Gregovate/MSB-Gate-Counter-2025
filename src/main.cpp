@@ -8,6 +8,14 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.15 — 2026-11-23
+ *   - Commit vehicle/reset/correction snapshots to OTA-preserving flash journal.
+ *   - Restore without SD; archive immutable timing records with verified bank reuse.
+ *   - Capture beam edges in IRAM/DRAM during flash writes; replay debounce by time.
+ *   - Report flash, SD and capture-overflow faults on MQTT and OLED.
+ * 25.12.28.0-modular-test.14 — 2026-11-23
+ *   - Retry startup count restoration after a missing SD becomes available.
+ *   - Preserve corrupt checkpoints and live totals; show persistent SD faults.
  * 25.12.28.0-modular-test.13 — 2026-11-22
  *   - Preserve occupied/long passages; publish counts before SD verification.
  *   - Poll beams before and between foreground maintenance operations.
@@ -69,15 +77,18 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.13";
+const char FWVersion[] = "25.12.28.0-modular-test.15";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
 
 void setup() {
     Serial.begin(115200);
+    pinMode(beamAPin, INPUT_PULLDOWN);pinMode(beamBPin, INPUT_PULLDOWN);
+    initializeBeamCapture(beamAPin,beamBPin);
+    initializeTrafficJournal();
     ElegantOTA.setAutoReboot(true);
-    //ElegantOTA.setFilesystemMode(true);
+    ElegantOTA.setFilesystemMode(false); // Internal data contains the traffic journal; firmware OTA remains enabled.
     Serial.println("Starting Gate Counter...");
 
   //Initialize Display
@@ -197,7 +208,6 @@ void setup() {
     delay(500); // display Startup
 
     //Initialize SD Card
-    SD.begin(PIN_SPI_CS);
     initSDCard();  // Initialize SD card and ready for Read/Write
 
     initSeasonalPaths();   // sets up annual data file structure
@@ -252,6 +262,8 @@ void loop() {
     // Retry durable saves and roll full dates even when no vehicle arrives.
     serviceCountState();
     detectCar();
+    static uint32_t lastSdHealth=0;
+    if(millis()-lastSdHealth>=60000UL){lastSdHealth=millis();checkSdHealth();detectCar();}
     DateTime now = rtc.now();
 
     currentTimeMinute = now.hour()*60 + now.minute(); // convert time to minutes since midnight
@@ -280,4 +292,6 @@ void loop() {
         KeepMqttAlive();
         lastKeepAliveMillis = millis();
     }
+    serviceTrafficJournal();
+    detectCar();
 }

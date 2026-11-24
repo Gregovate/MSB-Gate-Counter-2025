@@ -47,11 +47,16 @@ int main(){
  sample(1,0,584000);assert(totalDailyCars==1);sample(0,0,584500);
  for(unsigned i=0;i<100;++i)car(585000+i*1300);
  assert(totalDailyCars==101 && loggedBetween==1300 && !gateStuckAlarmActive);
+ // All raw transitions arrive while foreground storage is stalled.
+ unsigned beforeStall=totalDailyCars;
+ for(unsigned i=0;i<100;++i){unsigned t=2000000+i*1300;captureForLater(t,1,0);captureForLater(t+200,1,1);captureForLater(t+900,0,1);captureForLater(t+1100,0,0);}
+ ticks=2200000;detectCar();assert(totalDailyCars==int(beforeStall+100));
+ assert(timeBetweenCars_ms==1300);
  std::cout<<"PASS: Gate 582-second hold, residual A, one count, 100 closely spaced cars and current-event spacing\n";
 }
 '''
   with tempfile.TemporaryDirectory() as tmp:
-   p=Path(tmp);(p/'traffic').mkdir();(p/'traffic/Firmware.h').write_text(header);(p/'traffic/MagneticDiagnostics.h').write_text('')
+   p=Path(tmp);(p/'traffic').mkdir();(p/'traffic/Firmware.h').write_text(header+'\n#define BEAM_TEST_A beamAPin\n#define BEAM_TEST_B beamBPin\n#include \"'+str(ROOT/'tests/beam_native.h')+'\"\n');(p/'traffic/MagneticDiagnostics.h').write_text('')
    (p/'test.cpp').write_text(source+harness)
-   subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(p),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+   subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-I'+str(p),'-I'+str(ROOT/'include'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
    subprocess.run([str(p/'test')],check=True)

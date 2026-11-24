@@ -22,3 +22,6 @@ void getSavedValuesOnReboot();
 void checkAndCreateFile(const String &fileName, const String &header = "");
 void createAndInitializeHourlyFile(const String &fileName);
 void initSDCard();
+
+extern bool sdAvailable;
+void checkSdHealth();

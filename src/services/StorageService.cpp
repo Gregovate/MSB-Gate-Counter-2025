@@ -1,5 +1,7 @@
 #include "traffic/Firmware.h"
 
+bool sdAvailable=false;
+
 // Extracted from the production baseline; behavior fixes are separate changes.
 String sPath(const char *fname) {
     return seasonFolder + "/" + String(fname);
@@ -219,6 +221,7 @@ void getHourlyData() {
 }
 
 void saveDailyTotal() {
+    if(!sdAvailable)return;
     if (!countsReady()) return;
     if (!persistCountState()) return; // Preserve exports when the checkpoint fails.
     myFile = recordingOpen(fileName1, FILE_WRITE);
@@ -236,6 +239,7 @@ void saveDailyTotal() {
 }
 
 void saveShowTotal() {
+    if(!sdAvailable)return;
     if (!countsReady()) return;
     if (!persistCountState()) return; // Preserve exports when the checkpoint fails.
     myFile = recordingOpen(fileName2, FILE_WRITE);
@@ -252,6 +256,7 @@ void saveShowTotal() {
 }
 
 void saveDayOfMonth() {
+    if(!sdAvailable)return;
     myFile = recordingOpen(fileName3, FILE_WRITE);
     if (myFile) {
         myFile.print(dayOfMonth);
@@ -266,6 +271,7 @@ void saveDayOfMonth() {
 }
 
 void saveDaysRunning() {
+    if(!sdAvailable)return;
     myFile = recordingOpen(fileName4, FILE_WRITE);
     if (myFile) {
       myFile.print(daysRunning);
@@ -280,6 +286,7 @@ void saveDaysRunning() {
 }
 
 void saveHourlyCounts() {
+    if(!sdAvailable){reportHourlyExportStatus("SD_UNAVAILABLE");return;}
     if (!countsReady()) { reportHourlyExportStatus("SKIPPED_RESTORE_FAILED"); return; }
     if (!persistCountState()) { reportHourlyExportStatus("SKIPPED_CHECKPOINT_FAILED"); return; } // Preserve exports when the checkpoint fails.
     DateTime now = rtc.now();
@@ -431,7 +438,8 @@ void createAndInitializeHourlyFile(const String &fileName) {
 }
 
 void initSDCard() {
-  if(!SD.begin(PIN_SPI_CS)) {
+  sdAvailable=false;
+  if(!SD.begin(PIN_SPI_CS,SPI,4000000)) {
     Serial.println("Card Mount Failed");
     display.clearDisplay();
     display.setTextSize(1);
@@ -472,6 +480,7 @@ void initSDCard() {
   display.setCursor(0,line1);
   display.printf("SD Card Size: %lluMB\n", cardSize);
   display.display();
+  checkSdHealth();
 }
 
 
@@ -490,4 +499,30 @@ void applyRecordingCalendar() {
     checkAndCreateFile(fileName6,"DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, timeBetweenCars_ms");
     checkAndCreateFile(fileName7,"Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
     createAndInitializeHourlyFile(fileName5);
+}
+
+void checkSdHealth() {
+    if (SD.cardType()==CARD_NONE) {
+        // One bounded mount attempt on the existing health timer. Do not end a
+        // mounted filesystem underneath asynchronous downloads or live files.
+        if(!SD.begin(PIN_SPI_CS,SPI,4000000) || SD.cardType()==CARD_NONE) {
+            sdAvailable=false;
+            publishMQTT((String(topic_base_path)+"/System/sd/health").c_str(), "OFFLINE", true);
+            return;
+        }
+        ensureSeasonFolderExists(recordingYear()); // Never replaces already restored live totals.
+    }
+    File test=recordingOpen("/_sd_test.tmp",FILE_WRITE);
+    size_t written=test ? test.print("1") : 0;
+    test.flush(); test.close();
+    File check=recordingOpen("/_sd_test.tmp",FILE_READ);
+    bool ok=written==1 && check && check.size()==1 && check.read()=='1';
+    check.close();
+    sdAvailable=ok;
+    publishMQTT((String(topic_base_path)+"/System/sd/health").c_str(), ok ? "OK" : "WRITE_VERIFY_FAIL", true);
+    if (ok) {
+        recordingRemove("/_sd_test.tmp");
+        char status[48];snprintf(status,sizeof(status),"OK_%lluMB",(unsigned long long)(SD.totalBytes()/(1024ULL*1024ULL)));
+        publishMQTT((String(topic_base_path)+"/System/sd/status").c_str(),status,true);
+    } else publishMQTT(MQTT_DEBUG_LOG, "SD verification failed; check journalHealth for flash count durability");
 }
