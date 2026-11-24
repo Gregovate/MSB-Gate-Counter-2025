@@ -8,6 +8,9 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.22 — 2026-11-24
+ *   - Retain completed hourly temperatures and replay them on MQTT reconnect.
+ *   - Date each hourly slot; preserve the last 24 completed hours across midnight.
  * 25.12.28.0-modular-test.21 — 2026-11-24
  *   - Preserve Car outdoor temperature sample averages across reboots in NVS.
  *   - Keep saved report temperatures when no new valid average is available.
@@ -97,7 +100,7 @@
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.21";
+const char FWVersion[] = "25.12.28.0-modular-test.22";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
