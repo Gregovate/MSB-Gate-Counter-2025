@@ -8,6 +8,8 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 26.11.25.0 — 2026-11-25
+ *   - Release the installed 25.12.28.0-modular-test.25 code under the local release date.
  * 25.12.28.0-modular-test.25 — 2026-11-25
  *   - Group nightly hours through After9PM, preserve legacy reports and MQTT order.
  * 25.12.28.0-modular-test.24 — 2026-11-24
@@ -110,7 +112,7 @@
  */
 #include "traffic/NightlyCsv.h"
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.25";
+const char FWVersion[] = "26.11.25.0";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
