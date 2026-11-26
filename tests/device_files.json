@@ -2,6 +2,6 @@
   "tests/count_stubs/traffic/Firmware.h": "daa5f0c3257cd2e57274cda96f35ee88a269aa73528a054dd7e34856f3f2f94a",
   "include/traffic/OperatingPolicy.h": "0633a727818e14f6e4f722447c92a963ce3d88a57cd80faa8ba7e47acedecdc9",
   "src/services/OperatingSettings.cpp": "ffcb6434d480036fcb3a082804170b99a30b1243054ab1e28f597a5b320124cb",
-  "tests/operating_release_test.cpp": "89c3bdad8d9d4cbcaba5ec531755a7fe3e3d0c0ffe6ae6999f8b64de27fc76a0",
+  "tests/operating_release_test.cpp": "08f5a64277025495fef0de3ea616d73acc1af3423cb14f4489e0fb9019ada112",
   "docs/DHT_Compatibility_20261123.md": "41b87c59bedf2239182d2108ff061bba2532d28af3f8b0d40fd2e58dc90af9ae"
 }

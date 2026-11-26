@@ -109,7 +109,7 @@
   "summaryReplace": "beb1016aecbd33df5160e8dad1f37d2069af8e8e30f4bd31fd686553ae6ca3c1",
   "summaryCell": "b6dcdadbc4e087fb13bf70475d921f651d92d38599a52e09fc76e27a55608155",
   "savedSummaryTemperature": "b8da85f467e0e38698ed72d7d2654c3bcf4d2b79c92850b705d43655856e4120",
-  "upsertSummary": "63ecb7ca68c46369bdecbccae3f810d740af2885f6e17466e8bc35686aebe462",
+  "upsertSummary": "2fb1244dcde57cbf42fd6dabf9cb20b5b303c14642435fdf1c24ef9340749250",
   "recordOfficialVehicle": "bbf3f6007def50634fa326c6a6499b8a4035501a909db1b31d6fc20181fc9741",
   "writeOfficialSummaries": "9f29e65676aecef3d3b85b04b813ba38f494fe6448efd9c93416bbda4d1351c6",
   "sPath": "750860722f65e9096e9d8bd7458aa2dacecefbca7c369a3d25718c37e6a14901",
@@ -157,7 +157,7 @@
   "changeDirectory": "3ff8dda64db024144b6ba0b74c1e8feb62a37747261af7aa615d056ad6ab104a",
   "deleteSDFile": "471d9b3bbaf5b6633fa47ea2c63d1e2bfe23bdc4bd538280784adf3339ab353e",
   "renameSDFile": "c531330b6eb34717b1c86cf5b33634c5ffb25c07ef2e00ffeb91fc7c5d65b75d",
-  "setupServer": "a3af16796cc4393d3da7c72b614cd40e99d5e4ca71ddea00ce0f96882988365f",
+  "setupServer": "0ecbaa5e68ba4646b07bb82cf2ec18ef5b1e6517a1308f5ecb97470b7fee5599",
   "occupancyText": "490eefd5b0e6a607885d47d3fe4a80fb9a4ad38ee393cd1d5bad0fd5b7ebd0ca",
   "debugInPark": "58cab7921e5b139f10726cb850f553619f8f6a523c60e757bc12980e3d58ce12",
   "publishStateExitInPark": "86a17d76e8962c284d128f8fa0bfc60aa322ee47542158a021320bc57e35752d",
@@ -188,5 +188,8 @@
   "savedSummaryCell": "828f7a0b149f2cd9557354880cbd71bbf6790f66cd0a6a3d986e2a7b2d3b0f24",
   "parseHistoricalCount": "2fcbaf6918eed49ca479da5b73cd910aec4985fadce108f09eb416068c477134",
   "migratedRow": "b674f67cb6a5b44889605fd7f9574baba32861a0e0fad61b5d43e03b5fde5df2",
-  "preserveLegacy": "768a21f947c030d1a7f493d87547ea638eaeacff9d1b462b9881f3597a99692d"
+  "preserveLegacy": "768a21f947c030d1a7f493d87547ea638eaeacff9d1b462b9881f3597a99692d",
+  "sendNightlyReport": "ea433986950b84d446365aaa999737e164e15cb44fec59baa6441bd9ed5b6b03",
+  "legacyReportHeader": "d08f0e630b6a7e5d82f0b66039b81ab4201da2e911c393dfb743b18bd3d3a74c",
+  "readNightlyReport": "f9d923a2fc29f851256ed406ae6c93935e7809855b33c22bfb90ef9901da9603"
 }

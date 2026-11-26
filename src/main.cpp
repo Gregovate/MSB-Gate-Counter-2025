@@ -8,6 +8,8 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 26.11.25.2 — 2026-11-25
+ *   - Serve legacy nightly reports in current column order before the next nightly write.
  * 26.11.25.1 — 2026-11-25
  *   - Release the installed 25.12.28.0-modular-test.25 code under the local release date.
  * 25.12.28.0-modular-test.25 — 2026-11-25
@@ -112,7 +114,7 @@
  */
 #include "traffic/NightlyCsv.h"
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "26.11.25.1";
+const char FWVersion[] = "26.11.25.2";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
