@@ -53,6 +53,7 @@ inline std::string failWrite, failRead, failRename;
 struct File {
     std::string path; bool valid=false; size_t pos=0;
     operator bool() const {return valid;}
+    bool seek(size_t n){if(n>size())return false;pos=n;return true;}
     size_t position() const {return pos;}
     size_t size() const {return valid ? disk[path].size() : 0;}
     size_t write(const uint8_t* p,size_t n) {

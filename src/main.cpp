@@ -8,6 +8,8 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 25.12.28.0-modular-test.25 — 2026-11-25
+ *   - Group nightly hours through After9PM, preserve legacy reports and MQTT order.
  * 25.12.28.0-modular-test.24 — 2026-11-24
  *   - Archive the test season on the accepted date change, qualify passages by HA window,
  *     report dated occupancy and carry forward HA weather-closure day adjustments.
@@ -106,8 +108,9 @@
  *   - Add preservation/shared-file checks and Windows UTF-8/CRLF fixes.
  *   - Record local builds with licensed ElegantOTAPro 3.1.4; no device upload.
  */
+#include "traffic/NightlyCsv.h"
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "25.12.28.0-modular-test.24";
+const char FWVersion[] = "25.12.28.0-modular-test.25";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
@@ -260,7 +263,7 @@ void setup() {
     checkAndCreateFile(fileName4);
     //checkAndCreateFile(fileName5, "Date,Hour-17,Hour-18,Hour-19,Hour-20,Hour-21,Total,Temp");
     checkAndCreateFile(fileName6, "DateTime, TimeToPass_ms, ExitDailyTotal, InParkCars, AB_Follow_ms, timeBetweenCars_ms");
-    checkAndCreateFile(fileName7, "Date,DaysRunning,Before5,6PM,7PM,8PM,9PM,ShowTotal,DailyAvgTemp");
+    checkAndCreateFile(fileName7, NightlyCsv::cumulative);
     checkAndCreateFile(fileName8);
     checkAndCreateFile(fileName9);
     checkAndCreateFile(fileName10, "ms,beamB_raw,beamA_raw");
