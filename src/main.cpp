@@ -8,6 +8,8 @@
  * Older original history is preserved in docs/Firmware_History.md.
  *
  * CHANGELOG — newest first
+ * 26.11.27.2 — Restore all-day hourly MQTT counts and isolate production CSV exports.
+ *
  * 26.11.27.1 — Restore daytime live passage counts and occupancy for field checks.
  *
  * 26.11.25.5 — 2026-11-25
@@ -122,7 +124,7 @@
  */
 #include "traffic/NightlyCsv.h"
 #include "traffic/FirmwareVersion.h"
-const char FWVersion[] = "26.11.27.1";
+const char FWVersion[] = "26.11.27.2";
 
 #include "traffic/Firmware.h"
 #include "traffic/MagneticDiagnostics.h"
