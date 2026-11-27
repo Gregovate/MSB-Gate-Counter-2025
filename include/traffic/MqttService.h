@@ -10,3 +10,4 @@ void publishStateExitInPark();
 void publishTimingConfig();
 void callback(char* topic, byte* payload, unsigned int length);
 String occupancyText();
+bool officialOccupancyNow();

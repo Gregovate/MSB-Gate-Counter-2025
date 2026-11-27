@@ -3,11 +3,13 @@
 #include "traffic/MagneticDiagnostics.h"
 
 
-namespace { traffic::EntranceReading lastEntrance; }
+namespace { traffic::EntranceReading lastEntrance, liveEntrance; }
 String occupancyText() {
     if(!productionActive())return String(carCounterCars-totalDailyCars);
-    if(!mqttOnline() || !lastEntrance.fresh(officialCountDate(),rtc.now().unixtime()))return "unknown";
-    return String(static_cast<int>(lastEntrance.passages)-officialDailyPassages());
+    const bool official = officialOccupancyNow();
+    const auto& entrance = official ? lastEntrance : liveEntrance;
+    if(!mqttOnline() || !entrance.fresh(officialCountDate(),rtc.now().unixtime()))return "unknown";
+    return String(static_cast<int>(entrance.passages)-(official ? officialDailyPassages() : totalDailyCars));
 }
 
 void publishMQTT(const char *topic, const String &message, bool retainFlag) {
@@ -139,8 +141,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
            applyDaysAnchor(season,anchor))flagDailyShowSummarySaved=false;
         return;
     }
-    if(command==traffic::datedEntryTopic) {
-        if(lastEntrance.accept(message,officialCountDate(),rtc.now().unixtime()))publishStateExitInPark();
+    if(command==traffic::datedEntryTopic || command==traffic::liveEntryTopic) {
+        auto& entrance = command==traffic::datedEntryTopic ? lastEntrance : liveEntrance;
+        if(entrance.accept(message,officialCountDate(),rtc.now().unixtime()))publishStateExitInPark();
         return;
     }
     if (topicIs(topic,MQTT_SUB_CC_ENTER_TOTAL)) {

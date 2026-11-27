@@ -32,16 +32,19 @@ void logSensorStates() {
 void countTheCar() {
     serviceCountState(); // Captured event date owns rollover, even after a stall.
     serviceEventReset(); // Apply an armed logical reset before this event increments.
-    // Leave beam timing and stuck-beam detection running through closed periods.
+    // A season transition must finish before we change its durable baseline.
     if (productionBlocked() || (!productionActive() && productionDateMatches()))return;
-    if (productionActive()) {
-        if (!countEventClockValid()){noteUnqualifiedClock();return;}
-        if (!officialShowNow())return;
+    if (productionActive() && !countEventClockValid()) {
+        noteUnqualifiedClock();
+        return;
     }
-    activateTrafficVehicleEvent();
+    // Keep the live counter and detector feedback running between shows.
+    // Only eligible passages get a vehicle record in the season archive.
+    const bool recordPassage = !productionActive() || officialShowNow();
+    if (recordPassage) activateTrafficVehicleEvent();
     if (!countEventCanApply()) {
         // Preserve events during recovery without writing zero/fictitious dates.
-        recordPendingVehicle();
+        if (recordPassage) recordPendingVehicle();
         return;
     }
     DateTime now = countEventTime();
@@ -62,7 +65,7 @@ void countTheCar() {
 
     // Increment hourly car count
     int currentHour = now.hour();
-    hourlyCount[currentHour]++;
+    if (recordPassage) hourlyCount[currentHour]++;
 
 
     // Publish current hour's data to MQTT (NEW tree)
@@ -73,7 +76,7 @@ void countTheCar() {
 
 
     // increase Show Count only when show is open
-    recordOfficialVehicle();
+    if (recordPassage) recordOfficialVehicle();
 
     commitCountJournal(); // Only internal flash; no SD or network wait here.
 
@@ -88,6 +91,7 @@ void countTheCar() {
     publishMQTT(MQTT_PUB_TIME,timeBuf);
     persistCountState(); // SD projection follows immediate current-state publication.
     saveDailyTotal();
+    if (!recordPassage) return;
     saveShowTotal();
     saveHourlyCounts();
 
@@ -105,7 +109,7 @@ void countTheCar() {
         myFile.print(", ");
 
         // ExitDailyTotal
-        myFile.print(totalDailyCars);
+        myFile.print(productionActive() ? officialDailyPassages() : totalDailyCars);
         myFile.print(", ");
 
         // InParkCars

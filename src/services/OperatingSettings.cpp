@@ -70,6 +70,17 @@ bool officialShowNow() {
     return traffic::insideOfficialWindow(settings,gateDevice(),date,now.hour()*60+now.minute());
 }
 
+// Admissions start at show opening, even before Gate's delayed exit reset.
+bool officialOccupancyNow() {
+    if (!countEventClockValid()) return false;
+    DateTime now=countEventTime();
+    if (now.unixtime()<recordingShowStart().unixtime()) return false;
+    auto window=settings;
+    window.resetOffset=0;
+    int date=now.year()*10000+now.month()*100+now.day();
+    return traffic::insideOfficialWindow(window,true,date,now.hour()*60+now.minute());
+}
+
 void publishOperatingSettings() {
     if (!mqttOnline()) return;
     String base=String(topic_base_path)+"/State/";

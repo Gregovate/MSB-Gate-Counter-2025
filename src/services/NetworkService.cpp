@@ -113,6 +113,7 @@ void MQTTreconnect() {
                 // Subscribe to necessary topics (NEW TREE)
                 mqtt_client.subscribe(MQTT_SUB_CC_ENTER_TOTAL);
                 mqtt_client.subscribe(traffic::datedEntryTopic);
+                mqtt_client.subscribe(traffic::liveEntryTopic);
                 mqtt_client.subscribe(MQTT_SUB_CC_SHOW_TOTAL);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_DAILY);
                 mqtt_client.subscribe(MQTT_SUB_GATE_RESET_SHOW);

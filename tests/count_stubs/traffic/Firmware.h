@@ -199,7 +199,8 @@ inline bool appendTrafficCorrection(const traffic::CountRecord& c,uint32_t n){if
 
 inline const char* trafficJournalHealth(){return nativeJournalEnabled?"OK":"NOT_INITIALIZED";}
 
-inline void activateTrafficVehicleEvent(){}
+inline int vehicleActivations=0;
+inline void activateTrafficVehicleEvent(){++vehicleActivations;}
 #ifndef TRAFFIC_OPERATING_TEST
 inline void serviceEventReset(){}
 #endif
